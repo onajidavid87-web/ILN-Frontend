@@ -4,7 +4,7 @@ import { rpc, TransactionBuilder } from "@stellar/stellar-sdk";
 import { useCallback, useEffect, useState } from "react";
 import Footer from "../../components/Footer";
 import Navbar from "../../components/Navbar";
-import { TokenAmount } from "../../components/TokenSelector";
+import DueDateCountdown from "../../components/DueDateCountdown";
 import { RPC_URL } from "../../constants";
 import { useToast } from "../../context/ToastContext";
 import { useWallet } from "../../context/WalletContext";
@@ -24,40 +24,6 @@ function daysRemaining(dueDateTimestamp: bigint): number {
 
 function isOverdue(dueDateTimestamp: bigint): boolean {
   return daysRemaining(dueDateTimestamp) < 0;
-}
-
-function DaysChip({ due_date }: { due_date: bigint }) {
-  const days = daysRemaining(due_date);
-  const overdue = days < 0;
-  const urgent = days >= 0 && days <= 3;
-
-  if (overdue) {
-    return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/15 text-red-500 border border-red-500/30 text-xs font-semibold">
-        <span
-          className="material-symbols-outlined text-[12px]"
-          style={{ fontVariationSettings: "'FILL' 1" }}
-        >
-          warning
-        </span>
-        {Math.abs(days)}d overdue
-      </span>
-    );
-  }
-  if (urgent) {
-    return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/30 text-xs font-semibold">
-        <span className="material-symbols-outlined text-[12px]">schedule</span>
-        {days}d left
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container border border-outline-variant/20 text-on-surface-variant text-xs font-medium">
-      <span className="material-symbols-outlined text-[12px]">event</span>
-      {days}d left
-    </span>
-  );
 }
 
 // ─── Settle confirmation modal ────────────────────────────────────────────────
@@ -591,13 +557,22 @@ export default function PayerDashboard() {
                             </span>
                           </td>
 
-                          {/* Due date + days remaining */}
+                          {/* Due date + countdown */}
                           <td className="px-6 py-5">
                             <div className="flex flex-col gap-1.5">
                               <span className="text-sm text-on-surface">
                                 {formatDate(invoice.due_date)}
                               </span>
-                              {!paid && <DaysChip due_date={invoice.due_date} />}
+                              {!paid && (
+                                <DueDateCountdown
+                                  dueDate={invoice.due_date}
+                                  showClaimButton={true}
+                                  onClaimDefault={() => {
+                                    // TODO: Implement claim default logic
+                                    console.log("Claim default for invoice", invoice.id);
+                                  }}
+                                />
+                              )}
                             </div>
                           </td>
 

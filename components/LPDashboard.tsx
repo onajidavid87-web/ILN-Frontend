@@ -14,12 +14,8 @@ import {
   Invoice,
   submitSignedTransaction,
 } from "../utils/soroban";
-import { formatAddress, formatDate, formatTokenAmount, calculateYield } from "../utils/format";
-import { useWatchlist } from "../hooks/useWatchlist";
-import { usePayerScores } from "../hooks/usePayerScores";
-import RiskBadge from "./RiskBadge";
-import LPPortfolio from "./LPPortfolio";
-import { RISK_SORT_ORDER } from "../utils/risk";
+import { formatUSDC, formatAddress, formatDate, calculateYield } from "../utils/format";
+import DueDateCountdown from "./DueDateCountdown";
 
 type Tab = "discovery" | "my-funded" | "watchlist";
 type FundingStep = "approve" | "fund";
@@ -384,7 +380,13 @@ export default function LPDashboard() {
                       {(invoice.discount_rate / 100).toFixed(2)}%
                     </span>
                   </td>
-                  <td className="px-6 py-5 text-sm">{formatDate(invoice.due_date)}</td>
+                  <td className="px-6 py-5">
+                    {activeTab === "discovery" ? (
+                      <span className="text-sm text-on-surface-variant">{formatDate(invoice.due_date)}</span>
+                    ) : (
+                      <DueDateCountdown dueDate={invoice.due_date} />
+                    )}
+                  </td>
                   <td className="px-6 py-5 font-bold text-green-600">
                     <TokenAwareAmount amount={calculateYield(invoice.amount, invoice.discount_rate)} invoice={invoice} tokenMap={tokenMap} defaultToken={defaultToken} />
                   </td>
