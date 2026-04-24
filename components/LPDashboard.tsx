@@ -15,11 +15,12 @@ import {
 } from "../utils/soroban";
 import { formatAddress, formatDate, formatTokenAmount, calculateYield } from "../utils/format";
 import { formatUSDC, formatAddress, formatDate, calculateYield } from "../utils/format";
+import { useWatchlist } from "../hooks/useWatchlist";
 import { usePayerScores } from "../hooks/usePayerScores";
 import RiskBadge from "./RiskBadge";
 import { RISK_SORT_ORDER } from "../utils/risk";
 
-type Tab = "discovery" | "my-funded";
+type Tab = "discovery" | "my-funded" | "watchlist";
 type FundingStep = "approve" | "fund";
 
 export default function LPDashboard() {
@@ -37,6 +38,22 @@ export default function LPDashboard() {
   const [fundingError, setFundingError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<keyof Invoice | "risk">("amount");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
+  const { watchlist, toggleWatchlist, isInWatchlist } = useWatchlist(address || null);
+
+  const handleWatchlistToggle = (invoiceId: bigint, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      toggleWatchlist(invoiceId);
+      if (!isInWatchlist(invoiceId)) {
+        addToast({ type: "success", title: "Added to Watchlist" });
+      } else {
+        addToast({ type: "success", title: "Removed from Watchlist" });
+      }
+    } catch (error: any) {
+      addToast({ type: "error", title: "Watchlist Error", message: error.message });
+    }
+  };
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -188,6 +205,15 @@ export default function LPDashboard() {
 
   const discoveryInvoices = sortedInvoices.filter(i => i.status === "Pending");
   const myFundedInvoices = sortedInvoices.filter(i => i.funder === address);
+  
+  const watchlistInvoices = sortedInvoices
+    .filter(i => watchlist.some(w => w.id === i.id.toString()))
+    .map(i => {
+      const watchItem = watchlist.find(w => w.id === i.id.toString());
+      return { ...i, watchAddedAt: watchItem?.addedAt || 0 };
+    });
+  // If we are in watchlist, we probably want to sort by watchAddedAt descending if the user hasn't toggled sorting.
+  // We'll keep it simple and just use the same sortedInvoices logic.
 
   const toggleSort = (key: keyof Invoice | "risk") => {
     if (sortKey === key) {
@@ -221,6 +247,21 @@ export default function LPDashboard() {
             }`}
           >
             Discovery
+          </button>
+          <button
+            onClick={() => setActiveTab("watchlist")}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              activeTab === "watchlist"
+                ? "bg-primary text-surface-container-lowest shadow-md"
+                : "text-on-surface-variant hover:bg-surface-variant/30"
+            }`}
+          >
+            Watchlist
+            {watchlist.length > 0 && (
+              <span className="ml-2 bg-primary-container text-on-primary-container px-1.5 py-0.5 rounded-full text-[10px]">
+                {watchlist.length}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab("my-funded")}
@@ -257,6 +298,9 @@ export default function LPDashboard() {
               <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider">
                 Est. Yield
               </th>
+              {activeTab === "watchlist" && (
+                <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider">
+                  Added
               {activeTab === "discovery" && (
                 <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider cursor-pointer" onClick={() => toggleSort("risk")}>
                   Risk {sortKey === "risk" && (sortOrder === "asc" ? "↑" : "↓")}
@@ -268,18 +312,18 @@ export default function LPDashboard() {
           <tbody className="divide-y divide-surface-dim">
             {loading ? (
               <tr>
-                <td colSpan={7} className="px-6 py-12 text-center text-on-surface-variant italic">
+                <td colSpan={8} className="px-6 py-12 text-center text-on-surface-variant italic">
                   Loading invoices from Stellar...
                 </td>
               </tr>
-            ) : (activeTab === "discovery" ? discoveryInvoices : myFundedInvoices).length === 0 ? (
+            ) : (activeTab === "discovery" ? discoveryInvoices : activeTab === "watchlist" ? watchlistInvoices : myFundedInvoices).length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-6 py-12 text-center text-on-surface-variant italic">
-                  No {activeTab === "discovery" ? "pending" : "funded"} invoices found.
+                <td colSpan={8} className="px-6 py-12 text-center text-on-surface-variant italic">
+                  No {activeTab === "discovery" ? "pending" : activeTab === "watchlist" ? "saved" : "funded"} invoices found.
                 </td>
               </tr>
             ) : (
-              (activeTab === "discovery" ? discoveryInvoices : myFundedInvoices).map((invoice) => (
+              (activeTab === "discovery" ? discoveryInvoices : activeTab === "watchlist" ? watchlistInvoices : myFundedInvoices).map((invoice: any) => (
                 <tr key={invoice.id.toString()} className="hover:bg-surface-variant/10 transition-colors">
                   <td className="px-6 py-5 font-bold text-primary">#{invoice.id.toString()}</td>
                   <td className="px-6 py-5">
@@ -300,6 +344,28 @@ export default function LPDashboard() {
                   <td className="px-6 py-5 font-bold text-green-600">
                     <TokenAwareAmount amount={calculateYield(invoice.amount, invoice.discount_rate)} invoice={invoice} tokenMap={tokenMap} defaultToken={defaultToken} />
                   </td>
+                  {activeTab === "watchlist" && (
+                    <td className="px-6 py-5 text-xs text-on-surface-variant">
+                      {new Date(invoice.watchAddedAt).toLocaleDateString()}
+                    </td>
+                  )}
+                  <td className="px-6 py-5 text-right flex items-center justify-end gap-2">
+                    {(activeTab === "discovery" || activeTab === "watchlist") && (
+                      <button
+                        onClick={(e) => handleWatchlistToggle(invoice.id, e)}
+                        className={`p-2 rounded-full transition-colors ${
+                          isInWatchlist(invoice.id) 
+                            ? "text-red-500 hover:bg-red-50" 
+                            : "text-on-surface-variant hover:bg-surface-variant/50"
+                        }`}
+                        title={isInWatchlist(invoice.id) ? "Remove from watchlist" : "Add to watchlist"}
+                      >
+                        <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: isInWatchlist(invoice.id) ? "'FILL' 1" : "'FILL' 0" }}>
+                          bookmark
+                        </span>
+                      </button>
+                    )}
+                    {activeTab === "discovery" || (activeTab === "watchlist" && invoice.status === "Pending") ? (
                   {activeTab === "discovery" && (
                     <td className="px-6 py-5">
                       <RiskBadge
@@ -317,12 +383,20 @@ export default function LPDashboard() {
                         Fund
                       </button>
                     ) : (
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded ${
-                        invoice.status === 'Funded' ? 'bg-blue-100 text-blue-700' : 
-                        invoice.status === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}>
-                        {invoice.status}
-                      </span>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded ${
+                          invoice.status === 'Funded' ? 'bg-blue-100 text-blue-700' : 
+                          invoice.status === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                        }`}>
+                          {invoice.status}
+                        </span>
+                        {activeTab === "watchlist" && invoice.status !== "Pending" && (
+                          <span className="text-[10px] bg-error-container text-on-error-container px-2 py-0.5 rounded flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[10px]">warning</span>
+                            Already funded
+                          </span>
+                        )}
+                      </div>
                     )}
                   </td>
                 </tr>
