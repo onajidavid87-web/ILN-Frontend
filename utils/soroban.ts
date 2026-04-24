@@ -1,14 +1,14 @@
 import {
-    Account,
-    Address,
-    BASE_FEE,
-    nativeToScVal,
-    Operation,
-    rpc,
-    scValToNative,
-    Transaction,
-    TransactionBuilder,
-    xdr
+  xdr,
+  rpc,
+  Address,
+  scValToNative,
+  nativeToScVal,
+  TransactionBuilder,
+  Networks,
+  Operation,
+  Account,
+  BASE_FEE,
 } from "@stellar/stellar-sdk";
 import { CONTRACT_ID, NETWORK_PASSPHRASE, RPC_URL, TESTNET_EURC_TOKEN_ID, TESTNET_USDC_TOKEN_ID } from "../constants";
 
@@ -185,6 +185,39 @@ export async function fundInvoice(funder: string, invoice_id: bigint) {
   return finalTx;
 }
 
+
+export interface SubmitInvoiceArgs {
+  freelancer: string;
+  payer: string;
+  /** Amount in stroops (1 USDC = 10_000_000) */
+  amount: bigint;
+  /** Unix timestamp (seconds) */
+  dueDate: number;
+  /** Basis points * 100 — e.g. 500 = 5.00% */
+  discountRate: number;
+}
+
+/**
+ * Builds, simulates and assembles a submit_invoice transaction.
+ * Returns the final Transaction (ready for Freighter to sign) and the
+ * invoice ID predicted by the simulation.
+ */
+export async function submitInvoice(
+  args: SubmitInvoiceArgs
+): Promise<{ tx: ReturnType<typeof rpc.assembleTransaction>["build"] extends () => infer R ? R : never; invoiceId: bigint }> {
+  const contractAddress = CONTRACT_ID;
+  const method = "submit_invoice";
+
+  const params: xdr.ScVal[] = [
+    Address.fromString(args.freelancer).toScVal(),
+    Address.fromString(args.payer).toScVal(),
+    nativeToScVal(args.amount, { type: "i128" }),
+    nativeToScVal(BigInt(args.dueDate), { type: "u64" }),
+    nativeToScVal(args.discountRate, { type: "u32" }),
+  ];
+
+  const account = await server.getAccount(args.freelancer);
+
 async function getInvoiceRequiredFunding(invoiceId: bigint): Promise<bigint> {
   const invoice = await getInvoice(invoiceId);
   return invoice.amount;
@@ -237,6 +270,7 @@ export async function claimDefault(funder: string, invoice_id: bigint) {
 
   const account = await server.getAccount(funder);
 
+
   const tx = new TransactionBuilder(account, {
     fee: "10000",
     networkPassphrase: NETWORK_PASSPHRASE,
@@ -258,6 +292,30 @@ export async function claimDefault(funder: string, invoice_id: bigint) {
 
   const sim = await server.simulateTransaction(tx);
   if (!rpc.Api.isSimulationSuccess(sim)) {
+
+    throw new Error(`Simulation failed: ${(sim as any).error}`);
+  }
+
+  // Extract the predicted invoice ID from simulation retval
+  let invoiceId = BigInt(0);
+  try {
+    const raw = scValToNative(sim.result!.retval);
+    // Contract returns Result<u64, Error> — unwrap Ok variant
+    if (raw && typeof raw === "object" && "ok" in raw) {
+      invoiceId = BigInt((raw as any).ok);
+    } else if (raw && typeof raw === "object" && "Ok" in raw) {
+      invoiceId = BigInt((raw as any).Ok);
+    } else {
+      invoiceId = BigInt(raw as any);
+    }
+  } catch (_) {
+    // If we can't parse it, proceed without the ID — it'll be shown after poll
+  }
+
+  const finalTx = rpc.assembleTransaction(tx, sim).build();
+  return { tx: finalTx as any, invoiceId };
+}
+
     throw new Error(`Simulation failed: ${sim.error}`);
   }
 
@@ -604,4 +662,5 @@ export async function getPayerScoresBatch(
   });
   return map;
 }
+
 

@@ -30,6 +30,8 @@ import {
   TooltipProps,
 } from "recharts";
 import { NETWORK_NAME } from "../../constants";
+import { getAllInvoices, Invoice } from "../../utils/soroban";
+import AmountHistogram from "../../components/charts/AmountHistogram";
 
 // ─── Metadata (static export — works for server components; kept here for
 //     documentation purposes since this is a "use client" file) ───────────────
@@ -83,6 +85,8 @@ export interface AnalyticsPayload {
   summary: ProtocolSummary;
   /** Last 30 days of daily aggregates, ascending date order */
   daily: DailyBucket[];
+  /** Full list of invoices for distribution analysis */
+  invoices: Invoice[];
   /** ISO-8601 timestamp of when this data was last indexed */
   indexed_at: string;
 }
@@ -122,6 +126,7 @@ function generateMockPayload(): AnalyticsPayload {
       total_defaulted: 3,
     },
     daily,
+    invoices: [], // Real invoices will be fetched in the hook
     indexed_at: new Date().toISOString(),
   };
 }
@@ -167,7 +172,11 @@ function useAnalyticsPolling(): UseAnalyticsReturn {
 
   const fetch_ = useCallback(async () => {
     try {
-      const payload = await fetchAnalytics();
+      const [payload, invoices] = await Promise.all([
+        fetchAnalytics(),
+        getAllInvoices(),
+      ]);
+      payload.invoices = invoices;
       setData(payload);
       setLoadState("success");
       setLastUpdated(new Date());
@@ -686,6 +695,18 @@ export default function AnalyticsPage() {
                 </ResponsiveContainer>
               </div>
             </div>
+          </section>
+
+          {/* ── Invoice Size Distribution ───────────────────────────────── */}
+          <section
+            aria-labelledby="histogram-heading"
+            className="mt-14"
+          >
+            <SectionHeading>
+              <span id="histogram-heading">Amount Distribution</span>
+            </SectionHeading>
+
+            <AmountHistogram invoices={data?.invoices || []} />
           </section>
 
           {/* ── Footer note ───────────────────────────────────────────────── */}

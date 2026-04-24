@@ -4,6 +4,7 @@ import "./globals.css";
 import { ToastProvider } from "../context/ToastContext";
 import { WalletProvider } from "../context/WalletContext";
 import OnboardingFlow from "../components/onboarding/OnboardingFlow";
+import NetworkBanner from "../components/NetworkBanner";
 
 const manrope = Manrope({
   variable: "--font-manrope",
@@ -56,7 +57,12 @@ export default function RootLayout({
       >
         <ToastProvider>
           <WalletProvider>
-            {children}
+            <div className="min-h-screen flex flex-col">
+              <NetworkBanner />
+              <div className="flex-1">
+                {children}
+              </div>
+            </div>
             <OnboardingFlow />
           </WalletProvider>
         </ToastProvider>

@@ -12,19 +12,23 @@ export default function Navbar() {
   return (
     <nav className="fixed top-0 w-full z-50 bg-background/80 backdrop-blur-md border-b border-outline-variant/15 shadow-sm h-20 transition-colors duration-300">
       <div className="flex justify-between items-center px-8 h-full max-w-7xl mx-auto">
-
-        <div className="text-2xl font-bold text-primary tracking-tight">
+        <Link href="/" className="text-2xl font-bold text-primary tracking-tight hover:opacity-80 transition-opacity">
           ILN
-        </div>
-
+        </Link>
         <div className="hidden md:flex items-center gap-8">
           <a className="text-on-surface-variant hover:text-primary text-sm font-medium" href="#">
             How it works
           </a>
-          <a className="text-on-surface-variant hover:text-primary text-sm font-medium" href="#for-freelancers">
+          <Link
+            className="text-on-surface-variant hover:text-primary transition-colors duration-200 text-sm font-medium"
+            href="/freelancer"
+          >
             For Freelancers
-          </a>
-          <a className="text-on-surface-variant hover:text-primary text-sm font-medium" href="#for-lps">
+          </Link>
+          <a
+            className="text-on-surface-variant hover:text-primary transition-colors duration-200 text-sm font-medium"
+            href="#for-lps"
+          >
             For LPs
           </a>
           <Link
@@ -38,6 +42,12 @@ export default function Navbar() {
             href="/payer"
           >
             Pay Invoices
+          </Link>
+          <Link
+            className="text-on-surface-variant hover:text-primary transition-colors duration-200 text-sm font-medium"
+            href="/dashboard"
+          >
+            Dashboard
           </Link>
           <Link
             className="text-on-surface-variant hover:text-primary transition-colors duration-200 text-sm font-medium"
