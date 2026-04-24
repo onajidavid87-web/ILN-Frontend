@@ -16,6 +16,7 @@ const server = new rpc.Server(RPC_URL);
 const READ_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 const POLL_ATTEMPTS = 20;
 const ACCEPTED_SEND_STATUSES = new Set(["PENDING", "DUPLICATE"]);
+const DEFAULT_TOKEN_ALLOWANCE_LEDGER_BUFFER = 20_000;
 
 export interface Invoice {
   id: bigint;
@@ -34,14 +35,14 @@ export interface SubmittedInvoiceResult {
   txHash: string;
 }
 
-function buildReadTransaction(method: string, params: xdr.ScVal[]) {
+function buildReadTransaction(contractId: string, method: string, params: xdr.ScVal[]) {
   return new TransactionBuilder(new Account(READ_ACCOUNT, "0"), {
     fee: BASE_FEE,
     networkPassphrase: NETWORK_PASSPHRASE,
   })
     .addOperation(
       Operation.invokeContractFunction({
-        contract: CONTRACT_ID,
+        contract: contractId,
         function: method,
         args: params,
       })
@@ -56,7 +57,7 @@ export async function getInvoiceCount(): Promise<bigint> {
     throw new Error("RPC server is not healthy");
   }
 
-  const callResult = await server.simulateTransaction(buildReadTransaction("get_invoice_count", []));
+  const callResult = await server.simulateTransaction(buildReadTransaction(CONTRACT_ID, "get_invoice_count", []));
 
   if (rpc.Api.isSimulationSuccess(callResult)) {
     return scValToNative(callResult.result!.retval);
@@ -67,7 +68,7 @@ export async function getInvoiceCount(): Promise<bigint> {
 
 export async function getInvoice(id: bigint): Promise<Invoice> {
   const params: xdr.ScVal[] = [nativeToScVal(id, { type: "u64" })];
-  const callResult = await server.simulateTransaction(buildReadTransaction("get_invoice", params));
+  const callResult = await server.simulateTransaction(buildReadTransaction(CONTRACT_ID, "get_invoice", params));
 
   if (rpc.Api.isSimulationSuccess(callResult)) {
     const native = scValToNative(callResult.result!.retval);
@@ -128,6 +129,7 @@ export async function fundInvoice(funder: string, invoice_id: bigint) {
   const params: xdr.ScVal[] = [
     Address.fromString(funder).toScVal(),
     nativeToScVal(invoice_id, { type: "u64" }),
+    nativeToScVal(await getInvoiceRequiredFunding(invoice_id), { type: "i128" }),
   ];
 
   const funderAddress = Address.fromString(funder);
@@ -160,6 +162,11 @@ export async function fundInvoice(funder: string, invoice_id: bigint) {
 
   const finalTx = rpc.assembleTransaction(tx, sim).build();
   return finalTx;
+}
+
+async function getInvoiceRequiredFunding(invoiceId: bigint): Promise<bigint> {
+  const invoice = await getInvoice(invoiceId);
+  return invoice.amount;
 }
 
 export async function markPaid(payer: string, invoice_id: bigint) {
@@ -270,6 +277,110 @@ export async function submitInvoiceTransaction({
     invoiceId: confirmedInvoiceId,
     txHash: sent.hash,
   };
+}
+
+export async function getUsdcBalance(address: string, tokenId = TESTNET_USDC_TOKEN_ID): Promise<bigint> {
+  const params: xdr.ScVal[] = [Address.fromString(address).toScVal()];
+  const callResult = await server.simulateTransaction(buildReadTransaction(tokenId, "balance", params));
+
+  if (!rpc.Api.isSimulationSuccess(callResult) || !callResult.result?.retval) {
+    throw new Error("Failed to fetch USDC balance.");
+  }
+
+  return BigInt(scValToNative(callResult.result.retval));
+}
+
+export async function getUsdcAllowance({
+  owner,
+  spender = CONTRACT_ID,
+  tokenId = TESTNET_USDC_TOKEN_ID,
+}: {
+  owner: string;
+  spender?: string;
+  tokenId?: string;
+}): Promise<bigint> {
+  const params: xdr.ScVal[] = [
+    Address.fromString(owner).toScVal(),
+    Address.fromString(spender).toScVal(),
+  ];
+  const callResult = await server.simulateTransaction(buildReadTransaction(tokenId, "allowance", params));
+
+  if (!rpc.Api.isSimulationSuccess(callResult) || !callResult.result?.retval) {
+    throw new Error("Failed to fetch USDC allowance.");
+  }
+
+  return BigInt(scValToNative(callResult.result.retval));
+}
+
+export async function buildApproveUsdcTransaction({
+  owner,
+  amount,
+  spender = CONTRACT_ID,
+  tokenId = TESTNET_USDC_TOKEN_ID,
+}: {
+  owner: string;
+  amount: bigint;
+  spender?: string;
+  tokenId?: string;
+}) {
+  const account = await server.getAccount(owner);
+  const latestLedger = await server.getLatestLedger();
+  const expirationLedger = latestLedger.sequence + DEFAULT_TOKEN_ALLOWANCE_LEDGER_BUFFER;
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: tokenId,
+        function: "approve",
+        args: [
+          Address.fromString(owner).toScVal(),
+          Address.fromString(spender).toScVal(),
+          nativeToScVal(amount, { type: "i128" }),
+          nativeToScVal(expirationLedger, { type: "u32" }),
+        ],
+      })
+    )
+    .setTimeout(60)
+    .build();
+
+  const simulated = await server.simulateTransaction(tx);
+  if (!rpc.Api.isSimulationSuccess(simulated)) {
+    const message = "error" in simulated ? simulated.error : "Unable to simulate USDC approval.";
+    throw new Error(`Simulation failed: ${message}`);
+  }
+
+  return rpc.assembleTransaction(tx, simulated).build();
+}
+
+export async function submitSignedTransaction({
+  tx,
+  signTx,
+}: {
+  tx: Transaction;
+  signTx: (txXdr: string) => Promise<string>;
+}): Promise<{ txHash: string }> {
+  const prepared = await server.prepareTransaction(tx);
+  const signedXdr = await signTx(prepared.toXDR());
+  const signedTx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE) as Transaction;
+  const sent = await server.sendTransaction(signedTx);
+
+  if (!sent.hash || !sent.status) {
+    throw new Error("RPC server returned an invalid transaction response.");
+  }
+
+  if (!ACCEPTED_SEND_STATUSES.has(sent.status)) {
+    throw new Error(`Transaction submission failed with status ${sent.status}.`);
+  }
+
+  const finalResult = await server.pollTransaction(sent.hash, { attempts: POLL_ATTEMPTS });
+  if (finalResult.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+    throw new Error(`Transaction failed with status ${String(finalResult.status)}.`);
+  }
+
+  return { txHash: sent.hash };
 }
 
 function extractInvoiceIdFromTransaction(result: unknown): bigint | null {

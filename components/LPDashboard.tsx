@@ -3,14 +3,18 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useWallet } from "../context/WalletContext";
 import { useToast } from "../context/ToastContext";
-import { getAllInvoices, fundInvoice, Invoice } from "../utils/soroban";
+import {
+  buildApproveUsdcTransaction,
+  getAllInvoices,
+  getUsdcAllowance,
+  fundInvoice,
+  Invoice,
+  submitSignedTransaction,
+} from "../utils/soroban";
 import { formatUSDC, formatAddress, formatDate, calculateYield } from "../utils/format";
-import { rpc, TransactionBuilder } from "@stellar/stellar-sdk";
-import { RPC_URL } from "../constants";
-
-const server = new rpc.Server(RPC_URL);
 
 type Tab = "discovery" | "my-funded";
+type FundingStep = "approve" | "fund";
 
 export default function LPDashboard() {
   const { address, connect, signTx } = useWallet();
@@ -20,6 +24,10 @@ export default function LPDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("discovery");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isFunding, setIsFunding] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isCheckingAllowance, setIsCheckingAllowance] = useState(false);
+  const [allowance, setAllowance] = useState<bigint | null>(null);
+  const [fundingError, setFundingError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<keyof Invoice>("amount");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
@@ -44,7 +52,66 @@ export default function LPDashboard() {
       await connect();
       return;
     }
+    setFundingError(null);
+    setAllowance(null);
     setSelectedInvoice(invoice);
+  };
+
+  const refreshAllowance = useCallback(async (invoice: Invoice, walletAddress: string) => {
+    setIsCheckingAllowance(true);
+    setFundingError(null);
+
+    try {
+      const nextAllowance = await getUsdcAllowance({ owner: walletAddress });
+      setAllowance(nextAllowance);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fetch USDC allowance.";
+      setFundingError(message);
+    } finally {
+      setIsCheckingAllowance(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedInvoice || !address) return;
+    refreshAllowance(selectedInvoice, address);
+  }, [address, refreshAllowance, selectedInvoice]);
+
+  const requiredAmount = selectedInvoice?.amount ?? 0n;
+  const needsApproval = allowance === null || allowance < requiredAmount;
+  const currentStep: FundingStep = allowance !== null && allowance >= requiredAmount ? "fund" : "approve";
+
+  const approveUsdc = async () => {
+    if (!selectedInvoice || !address) return;
+    setIsApproving(true);
+
+    const toastId = addToast({ type: "pending", title: "Approving USDC..." });
+    try {
+      const tx = await buildApproveUsdcTransaction({
+        owner: address,
+        amount: selectedInvoice.amount,
+      });
+      const result = await submitSignedTransaction({ tx, signTx });
+
+      updateToast(toastId, {
+        type: "success",
+        title: "USDC approved",
+        message: `Allowance updated for ${formatUSDC(selectedInvoice.amount)}.`,
+        txHash: result.txHash,
+      });
+
+      setAllowance(selectedInvoice.amount);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Approval failed.";
+      setFundingError(message);
+      updateToast(toastId, {
+        type: "error",
+        title: "Approval failed",
+        message,
+      });
+    } finally {
+      setIsApproving(false);
+    }
   };
 
   const confirmFunding = async () => {
@@ -54,35 +121,22 @@ export default function LPDashboard() {
 
     try {
       const tx = await fundInvoice(address, selectedInvoice.id);
-      const signedTxXdr = await signTx(tx.toXDR());
-      
-      const sendResult = await server.sendTransaction(
-        TransactionBuilder.fromXDR(signedTxXdr, "Test SDF Network ; September 2015")
-      );
-      
-      if (sendResult.status === "PENDING") {
-        let txStatus = await server.getTransaction(sendResult.hash);
-        while (txStatus.status === "NOT_FOUND" || txStatus.status === "SUCCESS") {
-           if (txStatus.status === "SUCCESS") break;
-           await new Promise(r => setTimeout(r, 1000));
-           txStatus = await server.getTransaction(sendResult.hash);
-        }
-        
-        updateToast(toastId, {
-          type: "success",
-          title: "Funded Successfully",
-          txHash: sendResult.hash,
-        });
-        setSelectedInvoice(null);
-        fetchData();
-      } else {
-        throw new Error(`Failed to send transaction: ${sendResult.status}`);
-      }
-    } catch (error: any) {
+      const result = await submitSignedTransaction({ tx, signTx });
+
+      updateToast(toastId, {
+        type: "success",
+        title: "Funded Successfully",
+        txHash: result.txHash,
+      });
+      setSelectedInvoice(null);
+      fetchData();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "An unknown error occurred";
+      setFundingError(message);
       updateToast(toastId, {
         type: "error",
         title: "Funding Failed",
-        message: error.message || "An unknown error occurred",
+        message,
       });
     } finally {
       setIsFunding(false);
@@ -234,10 +288,48 @@ export default function LPDashboard() {
           <div className="bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant/20 w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="p-6 border-b border-surface-dim">
               <h4 className="text-xl font-bold">Fund Invoice #{selectedInvoice.id.toString()}</h4>
-              <p className="text-sm text-on-surface-variant mt-1">Please confirm the details below.</p>
+              <p className="text-sm text-on-surface-variant mt-1">Approve USDC only when the current allowance is too low, then complete the funding transaction.</p>
             </div>
             
             <div className="p-6 space-y-4">
+              {needsApproval ? (
+                <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-4">
+                  <div className="flex items-start gap-3">
+                    <StepPill active={currentStep === "approve"} complete={currentStep === "fund"}>
+                      1
+                    </StepPill>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold">Step 1: Approve USDC</p>
+                      <p className="text-xs text-on-surface-variant mt-1">
+                        {isCheckingAllowance
+                          ? "Checking current allowance..."
+                          : `Approve exactly ${formatUSDC(selectedInvoice.amount)} for the ILN contract.`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-xs text-on-surface-variant">
+                    <span>Current allowance</span>
+                    <span className="font-bold text-on-surface">{allowance === null ? "--" : formatUSDC(allowance)}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-primary/15 bg-primary-container/20 px-4 py-3 text-sm text-on-surface">
+                  Allowance already covers this invoice. You can go straight to funding.
+                </div>
+              )}
+
+              <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-4">
+                <div className="flex items-start gap-3">
+                  <StepPill active={currentStep === "fund"}>{needsApproval ? 2 : 1}</StepPill>
+                  <div>
+                    <p className="text-sm font-bold">{needsApproval ? "Step 2: Fund Invoice" : "Step 1: Fund Invoice"}</p>
+                    <p className="text-xs text-on-surface-variant mt-1">
+                      Send the invoice principal once the ILN contract can spend your USDC.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex justify-between text-sm">
                 <span className="text-on-surface-variant">You will send:</span>
                 <span className="font-bold">{formatUSDC(selectedInvoice.amount)}</span>
@@ -258,32 +350,72 @@ export default function LPDashboard() {
                 <span className="text-on-surface-variant">Estimated due date:</span>
                 <span className="font-bold">{formatDate(selectedInvoice.due_date)}</span>
               </div>
+
+              {fundingError ? (
+                <div className="rounded-xl border border-error/15 bg-error-container/70 px-4 py-3 text-sm text-on-error-container">
+                  {fundingError}
+                </div>
+              ) : null}
             </div>
 
             <div className="p-6 bg-surface-container-low flex gap-3">
               <button
-                disabled={isFunding}
+                disabled={isFunding || isApproving}
                 onClick={() => setSelectedInvoice(null)}
                 className="flex-1 py-3 rounded-xl font-bold text-sm border border-outline-variant hover:bg-surface-dim transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
-                disabled={isFunding}
-                onClick={confirmFunding}
+                disabled={isFunding || isApproving || isCheckingAllowance}
+                onClick={currentStep === "approve" ? approveUsdc : confirmFunding}
                 className="flex-[2] py-3 rounded-xl font-bold text-sm bg-primary text-surface-container-lowest hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {isFunding ? (
+                {isCheckingAllowance ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-surface-container-lowest border-t-transparent rounded-full animate-spin"></span>
+                    Checking allowance...
+                  </>
+                ) : isApproving ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-surface-container-lowest border-t-transparent rounded-full animate-spin"></span>
+                    Approving USDC...
+                  </>
+                ) : isFunding ? (
                   <>
                     <span className="w-4 h-4 border-2 border-surface-container-lowest border-t-transparent rounded-full animate-spin"></span>
                     Funding...
                   </>
-                ) : "Confirm & Fund"}
+                ) : currentStep === "approve" ? "Approve USDC" : "Fund Invoice"}
               </button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function StepPill({
+  active,
+  complete,
+  children,
+}: {
+  active: boolean;
+  complete?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
+        complete
+          ? "bg-primary text-surface-container-lowest"
+          : active
+            ? "bg-primary-container text-on-primary-container"
+            : "bg-surface-container-high text-on-surface-variant"
+      }`}
+    >
+      {children}
     </div>
   );
 }
