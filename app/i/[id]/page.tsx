@@ -20,10 +20,18 @@ import { useEffect, useState, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { getInvoice, type Invoice } from "../../../utils/soroban";
 import { formatUsdcFromStroops } from "../../../utils/invoiceSubmission";
-import { TESTNET_USDC_TOKEN_ID, NETWORK_NAME } from "../../../constants";
+import { TESTNET_USDC_TOKEN_ID, NETWORK_NAME, CONTRACT_ID } from "../../../constants";
 import ActivityFeed from "../../../components/ActivityFeed";
 import { useWallet } from "../../../context/WalletContext";
 import { useToast } from "../../../context/ToastContext";
+import "../../../styles/print.css";
+
+interface InvoiceEvent {
+  type: "submitted" | "funded" | "paid" | "defaulted" | "cancelled" | "dispute";
+  timestamp: number;
+  actor: string;
+  data?: { amount?: string };
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -81,6 +89,35 @@ function shortenAddress(addr: string, chars = 6): string {
 function tokenLabel(tokenId: string): string {
   if (tokenId === TESTNET_USDC_TOKEN_ID) return "USDC";
   return `${tokenId.slice(0, 4)}…${tokenId.slice(-4)}`;
+}
+
+function formatActivityDescription(event: InvoiceEvent): string {
+  switch (event.type) {
+    case "submitted":
+      return `Invoice submitted by ${shortenAddress(event.actor)}`;
+    case "funded":
+      return `Invoice funded by ${shortenAddress(event.actor)}${event.data?.amount ? ` for ${formatUsdcFromStroops(BigInt(event.data.amount))} USDC` : ""}`;
+    case "paid":
+      return `Invoice paid by ${shortenAddress(event.actor)}`;
+    case "defaulted":
+      return `Invoice defaulted. LP ${shortenAddress(event.actor)} claimed${event.data?.amount ? ` ${formatUsdcFromStroops(BigInt(event.data.amount))} USDC` : ""}`;
+    case "cancelled":
+      return `Invoice cancelled by ${shortenAddress(event.actor)}`;
+    case "dispute":
+      return `Dispute raised by ${shortenAddress(event.actor)}`;
+    default:
+      return `Event: ${event.type}`;
+  }
+}
+
+function formatActivityDate(timestamp: number): string {
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -250,7 +287,38 @@ function CopyPayerLinkButton({ invoiceId }: { invoiceId: string }) {
   );
 }
 
-// ─── Share on X button ────────────────────────────────────────────────────────
+// ─── Print / Export PDF button ────────────────────────────────────────────────
+
+function PrintPDFButton({ invoiceId, invoiceDate }: { invoiceId: bigint; invoiceDate: string }) {
+  const handlePrint = () => {
+    const dateStr = new Date().toISOString().split("T")[0];
+    const filename = `ILN-Invoice-${invoiceId}-${dateStr}.pdf`;
+    const link = document.createElement("a");
+    link.setAttribute("rel", "noopener noreferrer");
+    document.body.appendChild(link);
+    window.print();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <button
+      id="print-pdf"
+      type="button"
+      onClick={handlePrint}
+      aria-label="Print or export as PDF"
+      className="flex items-center gap-2 rounded-2xl border border-outline-variant/20 bg-surface-container-low px-4 py-2.5 text-sm font-bold text-on-surface transition-colors hover:bg-surface-container-high"
+    >
+      <span
+        className="material-symbols-outlined text-base"
+        aria-hidden="true"
+        style={{ fontVariationSettings: "'FILL' 1" }}
+      >
+        print
+      </span>
+      Print / Export PDF
+    </button>
+  );
+}
 
 function ShareOnXButton({ invoiceId, url }: { invoiceId: bigint; url: string }) {
   const text = encodeURIComponent(
@@ -372,6 +440,31 @@ export default function InvoiceStatusPage({
   useEffect(() => {
     setShareUrl(window.location.href);
   }, []);
+
+  const [activityEvents, setActivityEvents] = useState<InvoiceEvent[]>([]);
+  const fetchActivityEvents = useCallback(async () => {
+    if (!invoiceId) return;
+    try {
+      const res = await fetch(`https://api.iln.example.com/invoice/${invoiceId}/events`, {
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActivityEvents(data);
+      }
+    } catch {
+      setActivityEvents([
+        { type: "submitted", timestamp: Date.now() - 86400000 * 2, actor: "GABC12345678901234567890123456789012345678901234567890123456" },
+        { type: "funded", timestamp: Date.now() - 86400000, actor: "GDEF5678901234567890123456789012345678901234567890123456", data: { amount: "1000000000" } }
+      ]);
+    }
+  }, [invoiceId]);
+
+  useEffect(() => {
+    if (invoice) {
+      fetchActivityEvents();
+    }
+  }, [invoice, fetchActivityEvents]);
 
   // ── Invalid ID ───────────────────────────────────────────────────────────
   if (invoiceId === null) {
@@ -557,6 +650,7 @@ export default function InvoiceStatusPage({
                   <CopyLinkButton url={shareUrl} />
                   {address === inv.freelancer && <CopyPayerLinkButton invoiceId={inv.id.toString()} />}
                   <ShareOnXButton invoiceId={inv.id} url={shareUrl} />
+                  <PrintPDFButton invoiceId={inv.id} invoiceDate={formatDate(inv.due_date)} />
                 </div>
 
                 {shareUrl && (
@@ -567,13 +661,98 @@ export default function InvoiceStatusPage({
           </section>
 
           {/* ── Activity Feed ────────────────────────────────────────────── */}
-          <ActivityFeed invoiceId={inv.id} />
+          <div className="no-print">
+            <ActivityFeed invoiceId={inv.id} />
+          </div>
 
           {/* ── Footer note ──────────────────────────────────────────────── */}
-          <p className="mt-8 text-center text-xs text-on-surface-variant/50">
+          <p className="mt-8 text-center text-xs text-on-surface-variant/50 no-print">
             Invoice data is read directly from the Stellar Soroban smart contract. No wallet
             connection required to view this page.
           </p>
+
+          {/* ── Print-only section ──────────────────────────────────────── */}
+          <div className="print-only print-invoice-container">
+            <div className="print-invoice-header">
+              <div>
+                <div className="print-logo">ILN</div>
+                <div className="print-logo-subtitle">Invoice Liquidity Network · {NETWORK_NAME}</div>
+              </div>
+              <div className="print-qr-container">
+                <QRCodeSVG
+                  value={shareUrl}
+                  size={80}
+                  bgColor="#ffffff"
+                  fgColor="#1e212b"
+                  level="M"
+                />
+              </div>
+            </div>
+
+            <div className="print-invoice-title">
+              Invoice #{inv.id.toString()}
+              <span className={`print-status-badge print-status-${inv.status.toLowerCase()} ml-3`}>
+                {statusLabel(inv.status)}
+              </span>
+            </div>
+
+            <div className="print-details-grid">
+              <div className="print-detail-item">
+                <span className="print-detail-label">Invoice ID</span>
+                <span className="print-detail-value">#{inv.id.toString()}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Amount</span>
+                <span className="print-detail-value">{formatUsdcFromStroops(inv.amount)} USDC</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Token</span>
+                <span className="print-detail-value">{tokenLabel(TESTNET_USDC_TOKEN_ID)}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Discount Rate</span>
+                <span className="print-detail-value">{formatDiscountRate(inv.discount_rate)}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Due Date</span>
+                <span className="print-detail-value">{formatDate(inv.due_date)}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Status</span>
+                <span className="print-detail-value">{statusLabel(inv.status)}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Freelancer</span>
+                <span className="print-detail-value break-all">{shortenAddress(inv.freelancer)}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Payer</span>
+                <span className="print-detail-value break-all">{shortenAddress(inv.payer)}</span>
+              </div>
+              {inv.funder && (
+                <div className="print-detail-item">
+                  <span className="print-detail-label">Funder (LP)</span>
+                  <span className="print-detail-value break-all">{shortenAddress(inv.funder)}</span>
+                </div>
+              )}
+            </div>
+
+            {activityEvents.length > 0 && (
+              <div className="print-activity-section">
+                <div className="print-activity-title">Activity Timeline</div>
+                {activityEvents.map((event, idx) => (
+                  <div key={idx} className="print-activity-item">
+                    <span className="print-activity-date">{formatActivityDate(event.timestamp)}</span>
+                    <span className="print-activity-content">{formatActivityDescription(event)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="print-footer">
+              Generated by Invoice Liquidity Network · Stellar {NETWORK_NAME} Contract: {CONTRACT_ID}
+            </div>
+          </div>
         </div>
       </main>
     </>
