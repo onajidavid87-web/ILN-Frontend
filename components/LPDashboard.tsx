@@ -13,6 +13,9 @@ import {
 } from "../utils/soroban";
 import { formatUSDC, formatAddress, formatDate, calculateYield } from "../utils/format";
 import { useWatchlist } from "../hooks/useWatchlist";
+import { usePayerScores } from "../hooks/usePayerScores";
+import RiskBadge from "./RiskBadge";
+import { RISK_SORT_ORDER } from "../utils/risk";
 
 type Tab = "discovery" | "my-funded" | "watchlist";
 type FundingStep = "approve" | "fund";
@@ -29,7 +32,7 @@ export default function LPDashboard() {
   const [isCheckingAllowance, setIsCheckingAllowance] = useState(false);
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [fundingError, setFundingError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<keyof Invoice>("amount");
+  const [sortKey, setSortKey] = useState<keyof Invoice | "risk">("amount");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const { watchlist, toggleWatchlist, isInWatchlist } = useWatchlist(address || null);
@@ -63,6 +66,10 @@ export default function LPDashboard() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Fetch payer scores in batch whenever invoices change
+  const discoveryInvoicesList = invoices.filter(i => i.status === "Pending");
+  const { scores: payerScores, risks: payerRisks } = usePayerScores(discoveryInvoicesList);
 
   const handleFund = async (invoice: Invoice) => {
     if (!address) {
@@ -161,6 +168,11 @@ export default function LPDashboard() {
   };
 
   const sortedInvoices = [...invoices].sort((a: any, b: any) => {
+    if (sortKey === "risk") {
+      const ra = RISK_SORT_ORDER[payerRisks.get(a.payer) ?? "Unknown"];
+      const rb = RISK_SORT_ORDER[payerRisks.get(b.payer) ?? "Unknown"];
+      return sortOrder === "asc" ? ra - rb : rb - ra;
+    }
     const aVal = a[sortKey];
     const bVal = b[sortKey];
     if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
@@ -180,7 +192,7 @@ export default function LPDashboard() {
   // If we are in watchlist, we probably want to sort by watchAddedAt descending if the user hasn't toggled sorting.
   // We'll keep it simple and just use the same sortedInvoices logic.
 
-  const toggleSort = (key: keyof Invoice) => {
+  const toggleSort = (key: keyof Invoice | "risk") => {
     if (sortKey === key) {
       setSortOrder(sortOrder === "asc" ? "desc" : "asc");
     } else {
@@ -266,6 +278,9 @@ export default function LPDashboard() {
               {activeTab === "watchlist" && (
                 <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider">
                   Added
+              {activeTab === "discovery" && (
+                <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider cursor-pointer" onClick={() => toggleSort("risk")}>
+                  Risk {sortKey === "risk" && (sortOrder === "asc" ? "↑" : "↓")}
                 </th>
               )}
               <th className="px-6 py-4"></th>
@@ -326,6 +341,16 @@ export default function LPDashboard() {
                       </button>
                     )}
                     {activeTab === "discovery" || (activeTab === "watchlist" && invoice.status === "Pending") ? (
+                  {activeTab === "discovery" && (
+                    <td className="px-6 py-5">
+                      <RiskBadge
+                        risk={payerRisks.get(invoice.payer) ?? "Unknown"}
+                        score={payerScores.get(invoice.payer) ?? null}
+                      />
+                    </td>
+                  )}
+                  <td className="px-6 py-5 text-right">
+                    {activeTab === "discovery" ? (
                       <button
                         onClick={() => handleFund(invoice)}
                         className="bg-primary text-surface-container-lowest text-xs px-4 py-2 rounded-lg font-bold hover:bg-primary/90 shadow-sm active:scale-95 transition-all"
