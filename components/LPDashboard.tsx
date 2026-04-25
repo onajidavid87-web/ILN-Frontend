@@ -8,6 +8,8 @@ import InvoiceFilterBar from "./InvoiceFilterBar";
 import { useApprovedTokens } from "../hooks/useApprovedTokens";
 import { applyInvoiceFilters, useInvoiceFilters } from "../hooks/useInvoiceFilters";
 import SkeletonRow, { LP_DISCOVERY_COLUMNS } from "./SkeletonRow";
+import { EmptyState } from "./EmptyState";
+import { LPDiscoveryEmptyIllustration, NotificationsEmptyIllustration } from "./illustrations/EmptyIllustrations";
 import {
   buildApproveTokenTransaction,
   claimDefault,
@@ -24,6 +26,7 @@ import { usePayerScores } from "../hooks/usePayerScores";
 import RiskBadge from "./RiskBadge";
 import LPPortfolio from "./LPPortfolio";
 import { RISK_SORT_ORDER } from "../utils/risk";
+import { ExportButton } from "./ExportButton";
 
 
 type Tab = "discovery" | "my-funded" | "watchlist";
@@ -486,13 +489,14 @@ export default function LPDashboard() {
           </button>
         </div>
       </div>
-      <div className="px-6 pt-4">
+      <div className="px-6 pt-4 flex flex-col gap-3">
         <InvoiceFilterBar
           filters={filters}
           onFiltersChange={setFilters}
           onClearFilters={clearFilters}
           activeFilterCount={activeFilterCount}
         />
+        <ExportButton data={filteredInvoices} filenamePrefix="iln-lp-export" />
       </div>
 
       {activeTab === "my-funded" ? (
@@ -537,8 +541,20 @@ export default function LPDashboard() {
                 ))
               ) : (activeTab === "discovery" ? discoveryInvoices : watchlistInvoices).length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-on-surface-variant italic">
-                    No {activeTab === "discovery" ? "pending" : "saved"} invoices found.
+                  <td colSpan={8} className="px-6 py-12">
+                    <EmptyState
+                      title={activeTab === "discovery" ? "No Pending Invoices" : "Watchlist Empty"}
+                      description={
+                        activeTab === "discovery"
+                          ? "There are currently no active invoices waiting to be funded."
+                          : "You haven't added any invoices to your watchlist yet."
+                      }
+                      illustration={
+                        activeTab === "discovery" 
+                          ? <LPDiscoveryEmptyIllustration /> 
+                          : <NotificationsEmptyIllustration />
+                      }
+                    />
                   </td>
                 </tr>
               ) : (

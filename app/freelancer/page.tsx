@@ -21,6 +21,9 @@ import {
 import { rpc, TransactionBuilder } from "@stellar/stellar-sdk";
 import { RPC_URL, NETWORK_PASSPHRASE } from "../../constants";
 import SkeletonRow, { FREELANCER_COLUMNS } from "../../components/SkeletonRow";
+import { ExportButton } from "../../components/ExportButton";
+import { EmptyState } from "../../components/EmptyState";
+import { FreelancerEmptyIllustration } from "../../components/illustrations/EmptyIllustrations";
 
 const server = new rpc.Server(RPC_URL);
 
@@ -641,13 +644,14 @@ export default function FreelancerPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <div className="px-6 pt-4">
+                  <div className="px-6 pt-4 flex flex-col gap-3">
                     <InvoiceFilterBar
                       filters={filters}
                       onFiltersChange={setFilters}
                       onClearFilters={clearFilters}
                       activeFilterCount={activeFilterCount}
                     />
+                    <ExportButton data={filteredInvoices} filenamePrefix="iln-freelancer-export" />
                   </div>
                   <table className="w-full text-left" id="my-invoices-table">
                     <thead className="bg-surface-container-low">
@@ -676,24 +680,20 @@ export default function FreelancerPage() {
                         ))
                       ) : filteredInvoices.length === 0 ? (
                         <tr>
-                          <td
-                            colSpan={6}
-                            className="px-6 py-14 text-center"
-                          >
-                            <div className="flex flex-col items-center gap-3">
-                              <span className="material-symbols-outlined text-5xl text-on-surface-variant/30">
-                                inbox
-                              </span>
-                              <p className="text-on-surface-variant italic text-sm">
-                                No invoices found for your address.
-                              </p>
-                              <button
-                                onClick={() => setScreen("submit")}
-                                className="text-primary text-sm font-bold hover:underline"
-                              >
-                                Submit your first invoice →
-                              </button>
-                            </div>
+                          <td colSpan={6} className="px-6 py-12">
+                            <EmptyState
+                              title="No Invoices Yet"
+                              description="You haven't submitted any invoices. Submit your first invoice to get started."
+                              illustration={<FreelancerEmptyIllustration />}
+                              action={
+                                <button
+                                  onClick={() => setScreen("submit")}
+                                  className="bg-primary text-surface-container-lowest px-6 py-2 rounded-xl text-sm font-bold shadow-sm hover:bg-primary/90 transition-all active:scale-95"
+                                >
+                                  Submit your first invoice →
+                                </button>
+                              }
+                            />
                           </td>
                         </tr>
                       ) : (
