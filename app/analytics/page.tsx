@@ -33,6 +33,7 @@ import { NETWORK_NAME } from "../../constants";
 import { getAllInvoices, Invoice } from "../../utils/soroban";
 import AmountHistogram from "../../components/charts/AmountHistogram";
 import { ExportButton } from "../../components/ExportButton";
+import AnimatedNumber from "../../components/AnimatedNumber";
 
 // ─── Metadata (static export — works for server components; kept here for
 //     documentation purposes since this is a "use client" file) ───────────────
@@ -224,6 +225,26 @@ function formatTime(d: Date): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// ─── Formatter functions for AnimatedNumber ───────────────────────────────────
+
+/**
+ * Formats USDC values with $ prefix and M/K suffix on completion
+ * Used by AnimatedNumber for animated currency display
+ */
+function formatUsdcAnimated(value: number): string {
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${Math.round(value).toLocaleString()}`;
+}
+
+/**
+ * Formats percentage values with one decimal place
+ * Used by AnimatedNumber for animated percentage display
+ */
+function formatPercentAnimated(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 /** A single KPI summary card */
@@ -234,13 +255,17 @@ function MetricCard({
   value,
   sub,
   accent = false,
+  animatedValue,
+  valueFormatter,
 }: {
   id: string;
   icon: string;
   label: string;
-  value: string;
+  value: string | number;
   sub?: string;
   accent?: boolean;
+  animatedValue?: number;
+  valueFormatter?: (value: number) => string;
 }) {
   return (
     <div
@@ -266,7 +291,15 @@ function MetricCard({
         </span>
       </div>
       <p className={`font-headline text-3xl font-bold ${accent ? "text-primary" : "text-on-surface"}`}>
-        {value}
+        {animatedValue !== undefined && valueFormatter ? (
+          <AnimatedNumber
+            value={animatedValue}
+            duration={1500}
+            formatter={valueFormatter}
+          />
+        ) : (
+          value
+        )}
       </p>
       {sub && <p className="text-xs text-on-surface-variant">{sub}</p>}
     </div>
@@ -472,6 +505,8 @@ export default function AnalyticsPage() {
                 icon="description"
                 label="Total invoices submitted"
                 value={summary.total_invoices_submitted.toLocaleString()}
+                animatedValue={summary.total_invoices_submitted}
+                valueFormatter={(v) => Math.round(v).toLocaleString()}
                 sub="All-time across all statuses"
               />
               <MetricCard
@@ -479,6 +514,8 @@ export default function AnalyticsPage() {
                 icon="payments"
                 label="Total invoices funded"
                 value={summary.total_invoices_funded.toLocaleString()}
+                animatedValue={summary.total_invoices_funded}
+                valueFormatter={(v) => Math.round(v).toLocaleString()}
                 sub="Invoices that received LP capital"
                 accent
               />
@@ -487,6 +524,8 @@ export default function AnalyticsPage() {
                 icon="attach_money"
                 label="Total USDC volume funded"
                 value={formatUsdc(summary.total_usdc_volume_funded)}
+                animatedValue={summary.total_usdc_volume_funded}
+                valueFormatter={formatUsdcAnimated}
                 sub="Gross USDC disbursed to freelancers"
                 accent
               />
@@ -495,6 +534,8 @@ export default function AnalyticsPage() {
                 icon="trending_up"
                 label="Total yield paid to LPs"
                 value={formatUsdc(summary.total_yield_paid_to_lps)}
+                animatedValue={summary.total_yield_paid_to_lps}
+                valueFormatter={formatUsdcAnimated}
                 sub="Cumulative LP earnings from discount"
               />
               <MetricCard
@@ -502,6 +543,8 @@ export default function AnalyticsPage() {
                 icon="hourglass_empty"
                 label="Active invoices"
                 value={summary.active_invoices.toLocaleString()}
+                animatedValue={summary.active_invoices}
+                valueFormatter={(v) => Math.round(v).toLocaleString()}
                 sub="Funded, awaiting settlement"
               />
               <MetricCard
@@ -509,6 +552,12 @@ export default function AnalyticsPage() {
                 icon="report_problem"
                 label="Default rate"
                 value={defaultRate}
+                animatedValue={
+                  summary.total_invoices_funded > 0
+                    ? (summary.total_defaulted / summary.total_invoices_funded) * 100
+                    : 0
+                }
+                valueFormatter={formatPercentAnimated}
                 sub={`${summary.total_defaulted} defaulted / ${summary.total_invoices_funded} funded`}
               />
             </div>
