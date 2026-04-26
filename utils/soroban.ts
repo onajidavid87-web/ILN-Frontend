@@ -7,6 +7,7 @@ import {
   TransactionBuilder,
   Transaction,
   Operation,
+  Contract,
   Account,
   BASE_FEE,
 } from "@stellar/stellar-sdk";
@@ -30,12 +31,12 @@ const DEFAULT_TOKEN_ALLOWANCE_LEDGER_BUFFER = 20_000;
 
 export interface Invoice {
   id: bigint;
+  status: string;
   freelancer: string;
   payer: string;
   amount: bigint;
   due_date: bigint;
   discount_rate: number;
-  status: string;
   funder?: string;
   funded_at?: bigint;
   token?: string;
@@ -453,9 +454,11 @@ export async function submitInvoice(
     throw new Error(`Simulation failed: ${(sim as any).error}`);
   }
 
+  // Extract the predicted invoice ID from simulation retval
   let invoiceId = BigInt(0);
   try {
     const raw = scValToNative(sim.result!.retval);
+    // Contract returns Result<u64, Error> — unwrap Ok variant
     if (raw && typeof raw === "object" && "ok" in raw) {
       invoiceId = BigInt((raw as any).ok);
     } else if (raw && typeof raw === "object" && "Ok" in raw) {
@@ -463,16 +466,94 @@ export async function submitInvoice(
     } else {
       invoiceId = BigInt(raw as any);
     }
-  } catch {
-    // Proceed without ID — it will be confirmed after polling
+  } catch (_) {
+    // If we can't parse it, proceed without the ID — it'll be shown after poll
   }
 
   const finalTx = rpc.assembleTransaction(tx, sim).build();
-  return { tx: finalTx as unknown as Transaction, invoiceId };
+  return { tx: finalTx as any, invoiceId };
 }
 
-// ─── Write: submit invoice (full sign-and-send, self-contained) ───────────────
-// Used when the caller provides a signTx callback (e.g. SDK-style integration).
+export interface UpdateInvoiceArgs {
+  freelancer: string;
+  invoiceId: bigint;
+  amount: bigint;
+  dueDate: number;
+  discountRate: number;
+}
+
+export async function updateInvoice(
+  args: UpdateInvoiceArgs
+): Promise<{ tx: Transaction }> {
+  const params: xdr.ScVal[] = [
+    Address.fromString(args.freelancer).toScVal(),
+    nativeToScVal(args.invoiceId, { type: "u64" }),
+    nativeToScVal(args.amount, { type: "i128" }),
+    nativeToScVal(BigInt(args.dueDate), { type: "u64" }),
+    nativeToScVal(args.discountRate, { type: "u32" }),
+  ];
+
+  const account = await server.getAccount(args.freelancer);
+  const tx = new TransactionBuilder(account, {
+    fee: "10000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeHostFunction({
+        func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+          new xdr.InvokeContractArgs({
+            contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+            functionName: "update_invoice",
+            args: params,
+          })
+        ),
+        auth: [],
+      })
+    )
+    .setTimeout(60 * 5)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (!rpc.Api.isSimulationSuccess(sim)) {
+    throw new Error(`Simulation failed: ${(sim as any).error}`);
+  }
+
+  const finalTx = rpc.assembleTransaction(tx, sim).build();
+  return { tx: finalTx as any };
+}
+
+export async function cancelInvoice(
+  freelancer: string,
+  invoiceId: bigint
+): Promise<{ tx: any }> {
+  // Use a default sequence number / account for preparing or real one if needed
+  let account: Account;
+  try {
+    account = await server.getAccount(freelancer);
+  } catch {
+    account = new Account(freelancer, "1");
+  }
+  
+  const contract = new Contract(CONTRACT_ID);
+
+  const txUrl = new TransactionBuilder(account, { 
+    fee: BASE_FEE, 
+    networkPassphrase: NETWORK_PASSPHRASE 
+  })
+    .addOperation(
+      contract.call("cancel_invoice", nativeToScVal(invoiceId, { type: "u64" }))
+    )
+    .setTimeout(60 * 5)
+    .build();
+
+  const sim = await server.simulateTransaction(txUrl);
+  if (!rpc.Api.isSimulationSuccess(sim)) {
+    throw new Error(`Simulation failed: ${(sim as any).error}`);
+  }
+
+  const finalTx = rpc.assembleTransaction(txUrl, sim).build();
+  return { tx: finalTx as any };
+}
 
 export async function submitInvoiceTransaction({
   freelancer,

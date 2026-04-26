@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, type FormEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { NETWORK_NAME } from "../constants";
 import TokenSelector, { TokenAmount } from "../components/TokenSelector";
+import FieldTooltip from "./FieldTooltip";
 import { useToast } from "../context/ToastContext";
 import { useWallet } from "../context/WalletContext";
 import { useApprovedTokens } from "../hooks/useApprovedTokens";
@@ -31,6 +33,7 @@ interface SubmitInvoiceFormProps {
 }
 
 export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitInvoiceFormProps) {
+  const { t } = useTranslation();
   const { addToast, updateToast } = useToast();
   const { address, isConnected, connect, disconnect, networkMismatch, error: walletError, signTx } = useWallet();
   const { tokens, tokenMap, defaultToken, isLoading: tokensLoading, error: tokensError } = useApprovedTokens();
@@ -39,7 +42,7 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
   const [form, setForm] = useState<InvoiceFormValues>({
     ...INITIAL_FORM,
     ...initialValues,
-    dueDate: "", // Always blank per requirements
+    dueDate: "",
   });
   const [errors, setErrors] = useState<Partial<Record<keyof InvoiceFormValues | "wallet" | "submit", string>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -77,10 +80,10 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
       selectedToken?.symbol ?? "token",
     );
     if (networkMismatch) {
-      nextErrors.wallet = `Freighter must be connected to ${NETWORK_NAME}.`;
+      nextErrors.wallet = t("submitForm.walletError", { network: NETWORK_NAME });
     }
     if (!selectedToken && !tokensLoading) {
-      nextErrors.tokenId = "No approved tokens are currently available.";
+      nextErrors.tokenId = t("submitForm.noTokensAvailable");
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -93,7 +96,7 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
     const discountRate = parseDiscountRateToBps(form.discountRate);
 
     if (!address || !selectedToken || amount === null || dueDate === null || discountRate === null) {
-      setErrors({ submit: "Please review the form values and try again." });
+      setErrors({ submit: t("submitForm.reviewFormValues") });
       return;
     }
 
@@ -142,10 +145,10 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
       <div className="flex flex-col gap-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.28em] text-primary">Freelancer Portal</p>
-            <h3 className="text-2xl font-headline mt-2">Submit a new invoice on Stellar testnet</h3>
+            <p className="text-xs font-bold uppercase tracking-[0.28em] text-primary">{t("submitForm.freelancerPortal")}</p>
+            <h3 className="text-2xl font-headline mt-2">{t("submitForm.title")}</h3>
             <p className="text-sm text-on-surface-variant mt-2 max-w-xl">
-              Connect Freighter, enter the payer wallet, choose an approved token, and publish an invoice with an instant yield preview for you and liquidity providers.
+              {t("submitForm.subtitle")}
             </p>
           </div>
 
@@ -155,7 +158,7 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-on-surface-variant">
-                      Wallet
+                      {t("submitForm.wallet")}
                     </p>
                     <p className="font-mono text-sm break-all mt-1">{address}</p>
                   </div>
@@ -166,7 +169,7 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
                         : "bg-primary-container text-on-primary-container"
                     }`}
                   >
-                    {networkMismatch ? "Wrong network" : NETWORK_NAME}
+                    {networkMismatch ? t("submitForm.wrongNetwork") : NETWORK_NAME}
                   </span>
                 </div>
                 <button
@@ -174,7 +177,7 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
                   onClick={disconnect}
                   className="mt-4 w-full rounded-xl border border-outline-variant/20 px-4 py-2.5 text-sm font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors"
                 >
-                  Disconnect
+                  {t("submitForm.disconnect")}
                 </button>
               </div>
             ) : (
@@ -183,7 +186,7 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
                 onClick={connect}
                 className="w-full rounded-2xl bg-primary px-5 py-4 text-sm font-bold text-surface-container-lowest shadow-lg hover:bg-primary/90 transition-colors"
               >
-                Connect Freighter wallet
+                {t("submitForm.connectFreighter")}
               </button>
             )}
           </div>
@@ -199,7 +202,7 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
           <div className="flex items-center justify-between rounded-2xl border border-primary/20 bg-primary/10 px-5 py-4 transition-all animate-in fade-in slide-in-from-top-4">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-primary">info</span>
-              <p className="text-sm font-bold text-primary">Pre-filled from invoice #{prefillId}</p>
+              <p className="text-sm font-bold text-primary">{t("submitForm.prefilled", { id: prefillId })}</p>
             </div>
             <button 
               type="button"
@@ -215,9 +218,10 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
         <form className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]" onSubmit={handleSubmit}>
           <div className="space-y-5">
             <Field
-              label="Payer Stellar address"
+              label={t("submitForm.payerLabel")}
+              tooltip="The Stellar wallet address of the person or company who owes you payment. They'll need to sign a transaction to settle."
               error={errors.payer}
-              hint="Use the payer's public account address on Stellar testnet."
+              hint={t("submitForm.payerHint")}
             >
               <input
                 value={form.payer}
@@ -230,7 +234,8 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
             </Field>
 
             <TokenSelector
-              label="Settlement token"
+              label={t("submitForm.tokenLabel")}
+              tooltip="The currency for this invoice. Currently supported: USDC, EURC, XLM."
               value={effectiveTokenId}
               tokens={tokens}
               error={errors.tokenId}
@@ -240,13 +245,17 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
                 tokensError
                   ? tokensError
                   : tokensLoading
-                    ? "Loading approved tokens from the contract..."
-                    : "Approved tokens are fetched dynamically from the ILN token registry."
+                    ? t("submitForm.loadingTokens")
+                    : t("submitForm.tokensHint")
               }
             />
 
             <div className="grid gap-5 md:grid-cols-2">
-              <Field label={`Invoice amount${selectedToken ? ` (${selectedToken.symbol})` : ""}`} error={errors.amount}>
+              <Field 
+                label={`${t("submitForm.amountLabel")}${selectedToken ? ` (${selectedToken.symbol})` : ""}`} 
+                tooltip="The full value of the invoice in USDC. This is what the payer owes you in total."
+                error={errors.amount}
+              >
                 <input
                   value={form.amount}
                   onChange={(event) => setField("amount", event.target.value)}
@@ -256,7 +265,11 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
                 />
               </Field>
 
-              <Field label="Due date" error={errors.dueDate}>
+              <Field 
+                label="Due date" 
+                tooltip="The date by which the payer must settle. LPs can claim a default if this passes without payment."
+                error={errors.dueDate}
+              >
                 <input
                   value={form.dueDate}
                   onChange={(event) => setField("dueDate", event.target.value)}
@@ -269,8 +282,14 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
 
             <Field
               label="Discount rate (%)"
+              tooltip={
+                <>
+                  How much of the invoice value you give up in exchange for instant payment. 300 basis points = 3%. A lower rate attracts more LPs; a higher rate means you receive less upfront.
+                  <div className="mt-2 font-bold text-primary">Typical value: 100–500 bps</div>
+                </>
+              }
               error={errors.discountRate}
-              hint="The spread a liquidity provider earns when the payer settles in full."
+              hint={t("submitForm.discountRateHint")}
             >
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_120px]">
                 <input
@@ -284,6 +303,11 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
                   {preview.discountRatePercent.toFixed(2)}%
                 </div>
               </div>
+              {form.amount && selectedToken && (
+                <p className="mt-3 text-xs font-medium text-primary bg-primary/5 p-3 rounded-xl border border-primary/10 animate-in fade-in slide-in-from-top-1">
+                  You&apos;ll receive <span className="font-bold">{preview.payoutFormatted} {selectedToken.symbol}</span> instantly if funded at this rate
+                </p>
+              )}
             </Field>
 
             {errors.submit ? (
@@ -294,10 +318,10 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
 
             {submittedInvoiceId ? (
               <div className="rounded-2xl border border-primary/15 bg-primary-container/35 px-4 py-4">
-                <p className="text-xs font-bold uppercase tracking-[0.22em] text-on-primary-container/80">Submission successful</p>
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-on-primary-container/80">{t("submitForm.submissionSuccess")}</p>
                 <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-sm text-on-primary-container/80">Returned invoice ID</p>
+                    <p className="text-sm text-on-primary-container/80">{t("submitForm.returnedInvoiceId")}</p>
                     <p className="text-2xl font-bold text-on-primary-container">#{submittedInvoiceId}</p>
                   </div>
                   <button
@@ -305,11 +329,11 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
                     onClick={handleCopyInvoiceId}
                     className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-surface-container-lowest hover:bg-primary/90 transition-colors"
                   >
-                    Copy invoice ID
+                    {t("submitForm.copyInvoiceId")}
                   </button>
                 </div>
                 {lastTxHash ? (
-                  <p className="mt-3 text-xs text-on-primary-container/80 break-all">Transaction hash: {lastTxHash}</p>
+                  <p className="mt-3 text-xs text-on-primary-container/80 break-all">{t("submitForm.txHash")}: {lastTxHash}</p>
                 ) : null}
               </div>
             ) : null}
@@ -319,20 +343,20 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
               disabled={isSubmitting}
               className="w-full rounded-2xl bg-primary px-5 py-4 text-sm font-bold text-surface-container-lowest shadow-lg hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
             >
-              {isSubmitting ? "Submitting invoice..." : "Submit invoice"}
+              {isSubmitting ? t("submitForm.submitting") : t("submitForm.submitInvoice")}
             </button>
           </div>
 
           <aside className="rounded-[24px] bg-surface-container-low p-5 border border-outline-variant/15 h-fit">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-on-surface-variant">Live yield preview</p>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-on-surface-variant">{t("submitForm.preview.title")}</p>
             <div className="mt-5 space-y-4">
-              <PreviewRow label="Invoice face value" value={`${preview.amountFormatted} ${selectedToken?.symbol ?? ""}`.trim()} token={selectedToken ?? undefined} />
-              <PreviewRow label="Freelancer payout" value={`${preview.payoutFormatted} ${selectedToken?.symbol ?? ""}`.trim()} token={selectedToken ?? undefined} accent />
-              <PreviewRow label="LP yield at settlement" value={`${preview.yieldFormatted} ${selectedToken?.symbol ?? ""}`.trim()} token={selectedToken ?? undefined} />
-              <PreviewRow label="Discount rate" value={`${preview.discountRatePercent.toFixed(2)}%`} />
+              <PreviewRow label={t("submitForm.preview.invoiceFaceValue")} value={`${preview.amountFormatted} ${selectedToken?.symbol ?? ""}`.trim()} token={selectedToken ?? undefined} />
+              <PreviewRow label={t("submitForm.preview.freelancerPayout")} value={`${preview.payoutFormatted} ${selectedToken?.symbol ?? ""}`.trim()} token={selectedToken ?? undefined} accent />
+              <PreviewRow label={t("submitForm.preview.lpYield")} value={`${preview.yieldFormatted} ${selectedToken?.symbol ?? ""}`.trim()} token={selectedToken ?? undefined} />
+              <PreviewRow label={t("submitForm.preview.discountRate")} value={`${preview.discountRatePercent.toFixed(2)}%`} />
             </div>
             <div className="mt-5 rounded-2xl bg-surface-container-high px-4 py-4 text-sm text-on-surface-variant">
-              Submission is limited to {NETWORK_NAME}. The selected token is sent on-chain using that token contract&apos;s decimals, and the payer must later settle with the same asset.
+              {t("submitForm.previewNote", { network: NETWORK_NAME })}
             </div>
           </aside>
         </form>
@@ -343,11 +367,13 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
 
 function Field({
   label,
+  tooltip,
   hint,
   error,
   children,
 }: {
   label: string;
+  tooltip?: string | ReactNode;
   hint?: string;
   error?: string;
   children: ReactNode;
@@ -355,7 +381,10 @@ function Field({
   return (
     <label className="block">
       <div className="flex items-center justify-between gap-3 mb-2">
-        <span className="text-xs font-bold uppercase tracking-[0.22em] text-on-surface-variant">{label}</span>
+        <span className="text-xs font-bold uppercase tracking-[0.22em] text-on-surface-variant flex items-center">
+          {label}
+          {tooltip && <FieldTooltip content={tooltip} />}
+        </span>
         {error ? <span className="text-xs font-bold text-error">{error}</span> : null}
       </div>
       {children}

@@ -67,8 +67,8 @@ describe("Submit similar invoice feature", () => {
     renderForm(initialValues, "123");
 
     expect(screen.getByLabelText(/Payer Stellar address/i)).toHaveValue("GPAYER...");
-    expect(screen.getByLabelText(/Invoice amount/i)).toHaveValue(1000);
-    expect(screen.getByLabelText(/Discount rate \(%\)/i)).toHaveValue(5);
+    expect(screen.getByLabelText(/Invoice amount/i)).toHaveValue("1000");
+    expect(screen.getByLabelText(/Discount rate \(%\)/i)).toHaveValue("5");
   });
 
   it("ensures due date is always blank on initialization even with pre-fill", () => {

@@ -47,10 +47,10 @@ describe('PayInvoicePage', () => {
       connect: vi.fn(),
     });
 
-    render(<PayInvoicePage params={{ id: '1' }} />);
+    render(<PayInvoicePage params={Promise.resolve({ id: '1' })} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/100.00 USDC/)).toBeInTheDocument();
+      expect(screen.getByText(/100\s+USDC/)).toBeInTheDocument();
       expect(screen.getByText('Connect Wallet and Pay')).toBeInTheDocument();
     });
   });
@@ -61,7 +61,7 @@ describe('PayInvoicePage', () => {
       connect: vi.fn(),
     });
 
-    render(<PayInvoicePage params={{ id: '1' }} />);
+    render(<PayInvoicePage params={Promise.resolve({ id: '1' })} />);
 
     await waitFor(() => {
       expect(screen.getByText('Address Mismatch')).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe('PayInvoicePage', () => {
       address: 'GPAYER',
     });
 
-    render(<PayInvoicePage params={{ id: '1' }} />);
+    render(<PayInvoicePage params={Promise.resolve({ id: '1' })} />);
 
     await waitFor(() => {
       expect(screen.getByText('Invoice settled')).toBeInTheDocument();
@@ -97,7 +97,7 @@ describe('PayInvoicePage', () => {
     (soroban.markPaid as any).mockResolvedValue('mock-tx');
     (soroban.submitSignedTransaction as any).mockResolvedValue({ txHash: 'hash123' });
 
-    render(<PayInvoicePage params={{ id: '1' }} />);
+    render(<PayInvoicePage params={Promise.resolve({ id: '1' })} />);
 
     await waitFor(() => {
       expect(screen.getByText('Settle Invoice Now')).toBeInTheDocument();

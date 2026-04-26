@@ -23,6 +23,16 @@ import LPDashboard from "../LPDashboard";
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
+vi.mock("../../hooks/useInvoices", () => ({
+  useInvoices: vi.fn(),
+  useFundInvoice: vi.fn(() => ({
+    mutate: vi.fn(),
+    isPending: false,
+  })),
+}));
+
+import { useInvoices } from "../../hooks/useInvoices";
+
 vi.mock("@stellar/freighter-api", () => ({
   isConnected: vi.fn().mockResolvedValue(false),
   getAddress: vi.fn().mockResolvedValue({ address: null }),
@@ -77,8 +87,12 @@ function makeInvoice(id: bigint, status: string) {
 }
 
 /** Render the dashboard and navigate to the "My Funded" tab. */
-async function renderMyFundedTab(invoice: ReturnType<typeof makeInvoice>) {
-  getAllInvoices.mockResolvedValue([invoice]);
+async function renderMyFundedTab(invoice: any) {
+  (useInvoices as any).mockReturnValue({
+    data: [invoice],
+    isLoading: false,
+    dataUpdatedAt: Date.now(),
+  });
   render(<LPDashboard />);
 
   // Wait for the list to load then switch tab
@@ -89,7 +103,7 @@ async function renderMyFundedTab(invoice: ReturnType<typeof makeInvoice>) {
 
 describe("StatusBadge – all five invoice statuses", () => {
   beforeEach(() => {
-    getAllInvoices.mockReset();
+    (useInvoices as any).mockReset();
     getUsdcAllowance.mockReset();
   });
 
@@ -154,7 +168,11 @@ describe("StatusBadge – all five invoice statuses", () => {
       funder: null,
     };
 
-    getAllInvoices.mockResolvedValue([pendingInvoice]);
+    (useInvoices as any).mockReturnValue({
+      data: [pendingInvoice],
+      isLoading: false,
+      dataUpdatedAt: Date.now(),
+    });
     render(<LPDashboard />);
 
     // Default tab is Discovery
@@ -164,11 +182,15 @@ describe("StatusBadge – all five invoice statuses", () => {
   });
 
   it("renders multiple invoices with distinct correct badges simultaneously", async () => {
-    getAllInvoices.mockResolvedValue([
-      makeInvoice(20n, "Funded"),
-      makeInvoice(21n, "Paid"),
-      makeInvoice(22n, "Defaulted"),
-    ]);
+    (useInvoices as any).mockReturnValue({
+      data: [
+        makeInvoice(20n, "Funded"),
+        makeInvoice(21n, "Paid"),
+        makeInvoice(22n, "Defaulted"),
+      ],
+      isLoading: false,
+      dataUpdatedAt: Date.now(),
+    });
 
     render(<LPDashboard />);
     fireEvent.click(await screen.findByRole("button", { name: "My Funded" }));

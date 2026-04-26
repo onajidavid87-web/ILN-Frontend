@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import Footer from "../../components/Footer";
 import Navbar from "../../components/Navbar";
 import VoteProgressBar from "../../components/VoteProgressBar";
+import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import {
     Proposal,
     ProposalStatus,
@@ -158,6 +159,8 @@ function FilterTabs({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function GovernancePage() {
+  useDocumentTitle({ pageTitle: "Governance" });
+
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ProposalStatus | "All">("All");

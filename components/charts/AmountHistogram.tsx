@@ -193,7 +193,7 @@ export default function AmountHistogram({ invoices }: AmountHistogramProps) {
               axisLine={false} 
               tickLine={false} 
               tick={{ fill: "var(--color-on-surface-variant)", fontSize: 12 }} 
-              tickFormatter={(v: number) => yScale === "volume" && v >= 1000 ? `${v/1000}k` : v}
+              tickFormatter={(v: number) => yScale === "volume" && v >= 1000 ? `${v/1000}k` : v.toString()}
             />
             <Tooltip
               cursor={{ fill: "var(--color-surface-container-high)", opacity: 0.4 }}

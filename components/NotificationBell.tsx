@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useWallet } from "../context/WalletContext";
+import { useNotification } from "../context/NotificationContext";
 import NotificationDrawer from "./NotificationDrawer";
 
 export default function NotificationBell() {
   const { address } = useWallet();
+  const { setUnreadCount } = useNotification();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [unread, setUnread] = useState(0);
 
   const fetchNotifications = async () => {
     if (!address) return;
@@ -21,7 +22,7 @@ export default function NotificationBell() {
     setNotifications(data);
 
     const unreadCount = data.filter((n: any) => !n.read).length;
-    setUnread(unreadCount);
+    setUnreadCount(unreadCount);
   };
 
   useEffect(() => {
@@ -29,18 +30,13 @@ export default function NotificationBell() {
 
     const interval = setInterval(fetchNotifications, 60000);
     return () => clearInterval(interval);
-  }, [address]);
+  }, [address, setUnreadCount]);
 
   return (
     <div className="relative">
       {/* Bell */}
       <button onClick={() => setOpen(true)}>
         🔔
-        {unread > 0 && (
-          <span className="bg-red-500 text-white text-xs px-2 rounded-full">
-            {unread}
-          </span>
-        )}
       </button>
 
       {/* Drawer */}
@@ -48,7 +44,7 @@ export default function NotificationBell() {
         <NotificationDrawer
           notifications={notifications}
           setNotifications={setNotifications}
-          setUnread={setUnread}
+          setUnread={setUnreadCount}
           onClose={() => setOpen(false)}
         />
       )}

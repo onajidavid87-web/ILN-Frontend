@@ -1,11 +1,8 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import {
   applyFreelancerFiltersAndSort,
-  getStatusBadgeClass,
-  InvoiceStatusBadge,
 } from "../Dashboard";
 import type { Invoice } from "../../../utils/soroban";
 
@@ -22,24 +19,6 @@ function makeInvoice(id: bigint, status: string, amount: bigint, dueDate: bigint
     funded_at: undefined,
   };
 }
-
-describe("freelancer dashboard status badge", () => {
-  it("maps all required statuses to expected color classes", () => {
-    expect(getStatusBadgeClass("Pending")).toContain("bg-slate-100");
-    expect(getStatusBadgeClass("Funded")).toContain("bg-blue-100");
-    expect(getStatusBadgeClass("Paid")).toContain("bg-green-100");
-    expect(getStatusBadgeClass("Defaulted")).toContain("bg-red-100");
-    expect(getStatusBadgeClass("Cancelled")).toContain("bg-yellow-100");
-  });
-
-  it("renders status badge text and class", () => {
-    render(<InvoiceStatusBadge status="Paid" />);
-    const badge = screen.getByText("Paid");
-    expect(badge).toBeInTheDocument();
-    expect(badge.className).toContain("bg-green-100");
-    expect(badge.className).toContain("text-green-700");
-  });
-});
 
 describe("freelancer dashboard filter and sort", () => {
   const invoices = [

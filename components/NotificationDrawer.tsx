@@ -1,5 +1,7 @@
 "use client";
 
+import { useNotification } from "../context/NotificationContext";
+
 type Props = {
   notifications: any[];
   setNotifications: any;
@@ -13,6 +15,8 @@ export default function NotificationDrawer({
   setUnread,
   onClose,
 }: Props) {
+  const { clearUnread } = useNotification();
+
   const markAsRead = (id: string) => {
     const updated = notifications.map((n) =>
       n.id === id ? { ...n, read: true } : n
@@ -31,6 +35,7 @@ export default function NotificationDrawer({
 
     setNotifications(updated);
     setUnread(0);
+    clearUnread();
     localStorage.setItem("notifications", JSON.stringify(updated));
   };
 

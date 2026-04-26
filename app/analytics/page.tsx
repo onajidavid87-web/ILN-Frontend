@@ -19,19 +19,14 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { Metadata } from "next";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  TooltipProps,
-} from "recharts";
 import { NETWORK_NAME } from "../../constants";
 import { getAllInvoices, Invoice } from "../../utils/soroban";
 import AmountHistogram from "../../components/charts/AmountHistogram";
+import FundingChart from "../../components/charts/FundingChart";
+import DefaultRateChart from "../../components/charts/DefaultRateChart";
+import { ExportButton } from "../../components/ExportButton";
+import AnimatedNumber from "../../components/AnimatedNumber";
+import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 
 // ─── Metadata (static export — works for server components; kept here for
 //     documentation purposes since this is a "use client" file) ───────────────
@@ -223,6 +218,26 @@ function formatTime(d: Date): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// ─── Formatter functions for AnimatedNumber ───────────────────────────────────
+
+/**
+ * Formats USDC values with $ prefix and M/K suffix on completion
+ * Used by AnimatedNumber for animated currency display
+ */
+function formatUsdcAnimated(value: number): string {
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${Math.round(value).toLocaleString()}`;
+}
+
+/**
+ * Formats percentage values with one decimal place
+ * Used by AnimatedNumber for animated percentage display
+ */
+function formatPercentAnimated(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 /** A single KPI summary card */
@@ -233,13 +248,17 @@ function MetricCard({
   value,
   sub,
   accent = false,
+  animatedValue,
+  valueFormatter,
 }: {
   id: string;
   icon: string;
   label: string;
-  value: string;
+  value: string | number;
   sub?: string;
   accent?: boolean;
+  animatedValue?: number;
+  valueFormatter?: (value: number) => string;
 }) {
   return (
     <div
@@ -265,7 +284,15 @@ function MetricCard({
         </span>
       </div>
       <p className={`font-headline text-3xl font-bold ${accent ? "text-primary" : "text-on-surface"}`}>
-        {value}
+        {animatedValue !== undefined && valueFormatter ? (
+          <AnimatedNumber
+            value={animatedValue}
+            duration={1500}
+            formatter={valueFormatter}
+          />
+        ) : (
+          value
+        )}
       </p>
       {sub && <p className="text-xs text-on-surface-variant">{sub}</p>}
     </div>
@@ -290,25 +317,7 @@ function SectionHeading({
   );
 }
 
-/** Custom tooltip for recharts */
-function ChartTooltip({
-  active,
-  payload,
-  label,
-  valueFormatter,
-}: TooltipProps<number, string> & { valueFormatter: (v: number) => string }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3 shadow-xl">
-      <p className="mb-1.5 text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">
-        {label}
-      </p>
-      <p className="text-base font-bold text-on-surface">
-        {valueFormatter(payload[0].value as number)}
-      </p>
-    </div>
-  );
-}
+// ─── Shared chart axis / grid styles ─────────────────────────────────────────
 
 /** Spinner used during initial load */
 function Spinner() {
@@ -342,22 +351,9 @@ function ErrorState({ message }: { message: string }) {
   );
 }
 
-// ─── Shared chart axis / grid styles ─────────────────────────────────────────
-
-const CHART_TICK_STYLE = {
-  fill: "var(--color-on-surface-variant, #94a3b8)",
-  fontSize: 11,
-  fontFamily: "var(--font-body)",
-};
-const GRID_STROKE = "var(--color-outline-variant, #334155)";
-const AREA_STROKE = "var(--color-primary, #81a6c6)";
-// Stop 0 = opaque, Stop 1 = transparent (area fill gradient)
-const GRADIENT_ID_1 = "areaGrad1";
-const GRADIENT_ID_2 = "areaGrad2";
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
 export default function AnalyticsPage() {
+  useDocumentTitle({ pageTitle: "Analytics" });
+
   const { data, loadState, errorMessage, lastUpdated, refresh } =
     useAnalyticsPolling();
 
@@ -437,6 +433,9 @@ export default function AnalyticsPage() {
                 </span>
                 Refresh
               </button>
+              {data && data.invoices && (
+                <ExportButton data={data.invoices} filenamePrefix="iln-protocol-export" />
+              )}
             </div>
             {/* Stale-data banner */}
             {loadState === "error" && data && (
@@ -468,6 +467,8 @@ export default function AnalyticsPage() {
                 icon="description"
                 label="Total invoices submitted"
                 value={summary.total_invoices_submitted.toLocaleString()}
+                animatedValue={summary.total_invoices_submitted}
+                valueFormatter={(v) => Math.round(v).toLocaleString()}
                 sub="All-time across all statuses"
               />
               <MetricCard
@@ -475,6 +476,8 @@ export default function AnalyticsPage() {
                 icon="payments"
                 label="Total invoices funded"
                 value={summary.total_invoices_funded.toLocaleString()}
+                animatedValue={summary.total_invoices_funded}
+                valueFormatter={(v) => Math.round(v).toLocaleString()}
                 sub="Invoices that received LP capital"
                 accent
               />
@@ -483,6 +486,8 @@ export default function AnalyticsPage() {
                 icon="attach_money"
                 label="Total USDC volume funded"
                 value={formatUsdc(summary.total_usdc_volume_funded)}
+                animatedValue={summary.total_usdc_volume_funded}
+                valueFormatter={formatUsdcAnimated}
                 sub="Gross USDC disbursed to freelancers"
                 accent
               />
@@ -491,6 +496,8 @@ export default function AnalyticsPage() {
                 icon="trending_up"
                 label="Total yield paid to LPs"
                 value={formatUsdc(summary.total_yield_paid_to_lps)}
+                animatedValue={summary.total_yield_paid_to_lps}
+                valueFormatter={formatUsdcAnimated}
                 sub="Cumulative LP earnings from discount"
               />
               <MetricCard
@@ -498,6 +505,8 @@ export default function AnalyticsPage() {
                 icon="hourglass_empty"
                 label="Active invoices"
                 value={summary.active_invoices.toLocaleString()}
+                animatedValue={summary.active_invoices}
+                valueFormatter={(v) => Math.round(v).toLocaleString()}
                 sub="Funded, awaiting settlement"
               />
               <MetricCard
@@ -505,6 +514,12 @@ export default function AnalyticsPage() {
                 icon="report_problem"
                 label="Default rate"
                 value={defaultRate}
+                animatedValue={
+                  summary.total_invoices_funded > 0
+                    ? (summary.total_defaulted / summary.total_invoices_funded) * 100
+                    : 0
+                }
+                valueFormatter={formatPercentAnimated}
                 sub={`${summary.total_defaulted} defaulted / ${summary.total_invoices_funded} funded`}
               />
             </div>
@@ -516,7 +531,7 @@ export default function AnalyticsPage() {
             className="mt-14"
           >
             <SectionHeading>
-              <span id="charts-heading">Last 30 Days</span>
+              <span id="charts-heading">Funding Activity</span>
               <span className="text-xs font-semibold text-on-surface-variant">
                 Indexed{" "}
                 {new Date(indexed_at).toLocaleDateString("en-US", {
@@ -527,174 +542,19 @@ export default function AnalyticsPage() {
               </span>
             </SectionHeading>
 
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <FundingChart />
+          </section>
 
-              {/* Chart 1: Invoices funded per day */}
-              <div
-                id="chart-invoices-funded"
-                className="rounded-[20px] border border-outline-variant/15 bg-surface-container-lowest p-5 shadow-sm"
-              >
-                <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.22em] text-on-surface-variant">
-                  Invoices funded
-                </p>
-                <p className="mb-5 font-headline text-2xl font-bold text-on-surface">
-                  Per day
-                </p>
+          {/* ── Default Rate Trend ──────────────────────────────────────────────── */}
+          <section
+            aria-labelledby="default-rate-heading"
+            className="mt-14"
+          >
+            <SectionHeading>
+              <span id="default-rate-heading">Protocol Health</span>
+            </SectionHeading>
 
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart
-                    data={daily}
-                    margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
-                  >
-                    <defs>
-                      <linearGradient
-                        id={GRADIENT_ID_1}
-                        x1="0"
-                        y1="0"
-                        x2="0"
-                        y2="1"
-                      >
-                        <stop
-                          offset="5%"
-                          stopColor={AREA_STROKE}
-                          stopOpacity={0.35}
-                        />
-                        <stop
-                          offset="95%"
-                          stopColor={AREA_STROKE}
-                          stopOpacity={0}
-                        />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      stroke={GRID_STROKE}
-                      strokeOpacity={0.3}
-                      vertical={false}
-                    />
-                    <XAxis
-                      dataKey="label"
-                      tick={CHART_TICK_STYLE}
-                      tickLine={false}
-                      axisLine={false}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      tick={CHART_TICK_STYLE}
-                      tickLine={false}
-                      axisLine={false}
-                      allowDecimals={false}
-                    />
-                    <Tooltip
-                      content={
-                        <ChartTooltip
-                          valueFormatter={(v) => `${v} invoice${v !== 1 ? "s" : ""}`}
-                        />
-                      }
-                      cursor={{
-                        stroke: AREA_STROKE,
-                        strokeOpacity: 0.3,
-                        strokeWidth: 1,
-                        strokeDasharray: "4 2",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="invoices_funded"
-                      name="Invoices funded"
-                      stroke={AREA_STROKE}
-                      strokeWidth={2}
-                      fill={`url(#${GRADIENT_ID_1})`}
-                      dot={false}
-                      activeDot={{ r: 4, fill: AREA_STROKE, strokeWidth: 0 }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Chart 2: USDC volume funded per day */}
-              <div
-                id="chart-usdc-volume"
-                className="rounded-[20px] border border-outline-variant/15 bg-surface-container-lowest p-5 shadow-sm"
-              >
-                <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.22em] text-on-surface-variant">
-                  USDC volume funded
-                </p>
-                <p className="mb-5 font-headline text-2xl font-bold text-on-surface">
-                  Per day
-                </p>
-
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart
-                    data={daily}
-                    margin={{ top: 4, right: 4, left: -8, bottom: 0 }}
-                  >
-                    <defs>
-                      <linearGradient
-                        id={GRADIENT_ID_2}
-                        x1="0"
-                        y1="0"
-                        x2="0"
-                        y2="1"
-                      >
-                        <stop
-                          offset="5%"
-                          stopColor={AREA_STROKE}
-                          stopOpacity={0.35}
-                        />
-                        <stop
-                          offset="95%"
-                          stopColor={AREA_STROKE}
-                          stopOpacity={0}
-                        />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      stroke={GRID_STROKE}
-                      strokeOpacity={0.3}
-                      vertical={false}
-                    />
-                    <XAxis
-                      dataKey="label"
-                      tick={CHART_TICK_STYLE}
-                      tickLine={false}
-                      axisLine={false}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      tick={CHART_TICK_STYLE}
-                      tickLine={false}
-                      axisLine={false}
-                      tickFormatter={(v: number) => formatUsdc(v).replace("$", "")}
-                    />
-                    <Tooltip
-                      content={
-                        <ChartTooltip
-                          valueFormatter={(v) => formatUsdc(v)}
-                        />
-                      }
-                      cursor={{
-                        stroke: AREA_STROKE,
-                        strokeOpacity: 0.3,
-                        strokeWidth: 1,
-                        strokeDasharray: "4 2",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="usdc_volume"
-                      name="USDC volume"
-                      stroke={AREA_STROKE}
-                      strokeWidth={2}
-                      fill={`url(#${GRADIENT_ID_2})`}
-                      dot={false}
-                      activeDot={{ r: 4, fill: AREA_STROKE, strokeWidth: 0 }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+            <DefaultRateChart />
           </section>
 
           {/* ── Invoice Size Distribution ───────────────────────────────── */}

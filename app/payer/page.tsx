@@ -1,6 +1,7 @@
 "use client";
 
 import { rpc, TransactionBuilder } from "@stellar/stellar-sdk";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import InvoiceFilterBar from "../../components/InvoiceFilterBar";
 import Footer from "../../components/Footer";
@@ -13,6 +14,7 @@ import { useApprovedTokens } from "../../hooks/useApprovedTokens";
 import { applyInvoiceFilters, useInvoiceFilters } from "../../hooks/useInvoiceFilters";
 import { formatAddress, formatDate, formatTokenAmount } from "../../utils/format";
 import { getAllInvoices, Invoice, markPaid } from "../../utils/soroban";
+import TokenSelector, { TokenAmount } from "../../components/TokenSelector";
 import InvoiceTable, { ColumnDefinition } from "../../components/InvoiceTable";
 
 const server = new rpc.Server(RPC_URL);
@@ -27,6 +29,19 @@ function daysRemaining(dueDateTimestamp: bigint): number {
 
 function isOverdue(dueDateTimestamp: bigint): boolean {
   return daysRemaining(dueDateTimestamp) < 0;
+}
+
+function DaysChip({ due_date }: { due_date: bigint }) {
+  const days = daysRemaining(due_date);
+  const overdue = days < 0;
+
+  return (
+    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+      overdue ? "bg-red-100 text-red-700" : "bg-primary-container text-on-primary-container"
+    }`}>
+      {overdue ? `${Math.abs(days)}d overdue` : `${days}d remaining`}
+    </span>
+  );
 }
 
 // ─── Settle confirmation modal ────────────────────────────────────────────────
@@ -234,6 +249,7 @@ function SortTh({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PayerDashboard() {
+  const router = useRouter();
   const { address, isConnected, connect, signTx } = useWallet();
   const { addToast, updateToast } = useToast();
   const { tokenMap, defaultToken } = useApprovedTokens();
@@ -322,6 +338,32 @@ export default function PayerDashboard() {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTableRowElement>, invoice: Invoice, index: number) => {
+    const rowElements = Array.from(e.currentTarget.parentElement?.querySelectorAll('tr[role="row"]') || []);
+
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        (rowElements[index + 1] as HTMLElement)?.focus();
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        (rowElements[index - 1] as HTMLElement)?.focus();
+        break;
+      case "Enter":
+        e.preventDefault();
+        router.push(`/i/${invoice.id.toString()}`);
+        break;
+      case "s":
+      case "S":
+        if (invoice.status === "Funded" && !justPaid.has(invoice.id.toString())) {
+          e.preventDefault();
+          setSelectedInvoice(invoice);
+        }
+        break;
+    }
+  };
+
   // ── Settle handler ────────────────────────────────────────────────────────
   const confirmSettle = async () => {
     if (!selectedInvoice || !address) return;
@@ -381,6 +423,8 @@ export default function PayerDashboard() {
     } finally {
       setIsSettling(false);
     }
+  };
+
   const columns: ColumnDefinition<Invoice>[] = [
     {
       id: "id",
@@ -616,7 +660,27 @@ export default function PayerDashboard() {
                 <thead className="bg-surface-container-low">
                   <tr>
                     <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider">
-                      ID
+                      <div className="flex items-center gap-1">
+                        ID
+                        <div className="group/tooltip relative inline-block ml-1">
+                          <span className="material-symbols-outlined text-[14px] text-on-surface-variant/40 cursor-help">keyboard</span>
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/tooltip:block bg-surface-container-highest text-on-surface text-[10px] p-2 rounded shadow-xl w-max z-20 normal-case font-normal border border-outline-variant/20">
+                            <div className="font-bold mb-1 border-b border-outline-variant/20 pb-1">Shortcuts</div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <kbd className="bg-surface-dim px-1.5 py-0.5 rounded border border-outline-variant/30 min-w-[20px] text-center">↑↓</kbd>
+                              <span>Navigate rows</span>
+                            </div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <kbd className="bg-surface-dim px-1.5 py-0.5 rounded border border-outline-variant/30 min-w-[20px] text-center">↵</kbd>
+                              <span>Open detail</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <kbd className="bg-surface-dim px-1.5 py-0.5 rounded border border-outline-variant/30 min-w-[20px] text-center">S</kbd>
+                              <span>Settle invoice</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </th>
                     <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider">
                       Freelancer
@@ -663,7 +727,7 @@ export default function PayerDashboard() {
                       </td>
                     </tr>
                   ) : (
-                    sortedInvoices.map((invoice) => {
+                    sortedInvoices.map((invoice, index) => {
                       const overdue = isOverdue(invoice.due_date);
                       const paid =
                         invoice.status === "Paid" ||
@@ -672,7 +736,10 @@ export default function PayerDashboard() {
                       return (
                         <tr
                           key={invoice.id.toString()}
-                          className={`transition-colors ${
+                          tabIndex={0}
+                          role="row"
+                          onKeyDown={(e) => handleKeyDown(e, invoice, index)}
+                          className={`transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset focus:bg-primary/5 ${
                             overdue && !paid
                               ? "bg-red-500/[0.03] hover:bg-red-500/[0.06]"
                               : "hover:bg-surface-container/50"

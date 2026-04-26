@@ -21,10 +21,11 @@ import {
 import { rpc, TransactionBuilder } from "@stellar/stellar-sdk";
 import { RPC_URL, NETWORK_PASSPHRASE } from "../../constants";
 import SkeletonRow, { FREELANCER_COLUMNS } from "../../components/SkeletonRow";
+import { ExportButton } from "../../components/ExportButton";
+import { EmptyState } from "../../components/EmptyState";
+import { useTranslation } from "react-i18next";
 
 const server = new rpc.Server(RPC_URL);
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 type Screen = "submit" | "my-invoices";
 
@@ -41,8 +42,6 @@ const EMPTY_FORM: FormState = {
   dueDate: "",
   discountRate: "",
 };
-
-// ─── Status Badge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
@@ -65,9 +64,9 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
 export default function FreelancerPage() {
+  const { t, i18n } = useTranslation();
+  const getLocale = () => i18n.language === "es" ? "es-ES" : "en-US";
   const { address, isConnected, connect } = useWallet();
   const { addToast, updateToast } = useToast();
   const { signTx } = useWallet();
@@ -89,7 +88,6 @@ export default function FreelancerPage() {
     activeFilterCount,
   } = useInvoiceFilters({ namespace: "freelancerInvoices" });
 
-  // ── Fetch invoices for connected wallet ─────────────────────────────────────
   const fetchMyInvoices = useCallback(async () => {
     if (!address) return;
     setLoadingInvoices(true);
@@ -126,30 +124,28 @@ export default function FreelancerPage() {
     [defaultToken?.contractId, filters, invoices, tokenMap],
   );
 
-  // ── Form validation ──────────────────────────────────────────────────────────
   function validate(): boolean {
     const next: Partial<FormState> = {};
     if (!form.payer.trim() || form.payer.trim().length < 56) {
-      next.payer = "Enter a valid Stellar address (56 characters).";
+      next.payer = t("freelancer.validation.payerRequired");
     }
     const amt = parseFloat(form.amount);
     if (!form.amount || isNaN(amt) || amt <= 0) {
-      next.amount = "Enter a positive USDC amount.";
+      next.amount = t("freelancer.validation.amountRequired");
     }
     if (!form.dueDate) {
-      next.dueDate = "Select a due date.";
+      next.dueDate = t("freelancer.validation.dueDateRequired");
     } else if (new Date(form.dueDate) <= new Date()) {
-      next.dueDate = "Due date must be in the future.";
+      next.dueDate = t("freelancer.validation.dueDateFuture");
     }
     const rate = parseFloat(form.discountRate);
     if (!form.discountRate || isNaN(rate) || rate < 0 || rate > 100) {
-      next.discountRate = "Enter a discount rate between 0 and 100.";
+      next.discountRate = t("freelancer.validation.discountRange");
     }
     setErrors(next);
     return Object.keys(next).length === 0;
   }
 
-  // ── Submit handler ───────────────────────────────────────────────────────────
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!isConnected) {
@@ -159,17 +155,14 @@ export default function FreelancerPage() {
     if (!validate()) return;
 
     setIsSubmitting(true);
-    const toastId = addToast({ type: "pending", title: "Submitting Invoice…" });
+    const toastId = addToast({ type: "pending", title: t("freelancer.toast.submitting") });
 
     try {
-      // Convert amount (USDC decimal) → stroops (× 10_000_000)
       const amountStroops = BigInt(Math.round(parseFloat(form.amount) * 10_000_000));
-      // Convert due date string to unix seconds
       const dueDateUnix = Math.floor(new Date(form.dueDate).getTime() / 1000);
-      // Convert percent → basis-points×100 (contract expects rate * 100, e.g. 5% → 500)
       const discountBps = Math.round(parseFloat(form.discountRate) * 100);
 
-      const { tx, invoiceId } = await submitInvoice({
+      const { tx } = await submitInvoice({
         freelancer: address!,
         payer: form.payer.trim(),
         amount: amountStroops,
@@ -194,12 +187,12 @@ export default function FreelancerPage() {
           tries++;
         }
 
-        setConfirmedId(invoiceId);
+        setConfirmedId(null);
         setForm(EMPTY_FORM);
         setErrors({});
         updateToast(toastId, {
           type: "success",
-          title: "Invoice Submitted!",
+          title: t("freelancer.toast.submitted"),
           txHash: (sendResult as any).hash,
         });
       } else {
@@ -210,36 +203,41 @@ export default function FreelancerPage() {
     } catch (err: any) {
       updateToast(toastId, {
         type: "error",
-        title: "Submission Failed",
-        message: err?.message ?? "An unknown error occurred.",
+        title: t("freelancer.toast.submissionFailed"),
+        message: err?.message ?? t("freelancer.toast.unknownError"),
       });
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  // ─── Render ──────────────────────────────────────────────────────────────────
+  const tableHeaders = [
+    t("freelancer.invoices.headers.id"),
+    t("freelancer.invoices.headers.payer"),
+    t("freelancer.invoices.headers.amount"),
+    t("freelancer.invoices.headers.discount"),
+    t("freelancer.invoices.headers.dueDate"),
+    t("freelancer.invoices.headers.status"),
+  ];
+
   return (
     <>
       <Navbar />
       <main className="min-h-screen pt-28 pb-20 px-4">
         <div className="max-w-4xl mx-auto">
 
-          {/* ── Page Header ──────────────────────────────────────────────────── */}
           <div className="mb-8">
             <p className="text-sm font-bold uppercase tracking-widest text-primary mb-2">
-              Freelancer Portal
+              {t("submitForm.freelancerPortal")}
             </p>
             <h1 className="text-4xl font-bold tracking-tight mb-3">
-              Invoice Dashboard
+              {t("freelancer.pageTitle")}
             </h1>
             <p className="text-on-surface-variant max-w-xl">
-              Submit unpaid invoices to the ILN protocol and get paid early by
-              liquidity providers — all on Stellar testnet.
+              {t("freelancer.pageSubtitle")}
             </p>
           </div>
 
-          {/* ── Tab switcher ─────────────────────────────────────────────────── */}
           <div className="flex bg-surface-container-low p-1 rounded-xl w-fit mb-8 gap-1">
             {(["submit", "my-invoices"] as Screen[]).map((s) => (
               <button
@@ -255,45 +253,30 @@ export default function FreelancerPage() {
                     : "text-on-surface-variant hover:bg-surface-variant/30"
                 }`}
               >
-                {s === "submit" ? (
-                  <span className="flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[18px]">
-                      add_circle
-                    </span>
-                    Submit Invoice
+                <span className="flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[18px]">
+                    {s === "submit" ? "add_circle" : "receipt_long"}
                   </span>
-                ) : (
-                  <span className="flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[18px]">
-                      receipt_long
-                    </span>
-                    My Invoices
-                  </span>
-                )}
+                  {s === "submit" ? t("freelancer.tabs.submitInvoice") : t("freelancer.tabs.myInvoices")}
+                </span>
               </button>
             ))}
           </div>
 
-          {/* ═══════════════════════════════════════════════════════════════════
-              SCREEN 1 — Submit Invoice
-          ════════════════════════════════════════════════════════════════════ */}
           {screen === "submit" && (
             <div className="bg-surface-container-lowest rounded-2xl shadow-xl border border-outline-variant/10 overflow-hidden">
-              {/* Card header */}
               <div className="p-6 border-b border-surface-dim">
                 <h2 className="text-xl font-bold flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary">
                     send
                   </span>
-                  Submit a New Invoice
+                  {t("freelancer.submit.cardTitle")}
                 </h2>
                 <p className="text-sm text-on-surface-variant mt-1">
-                  Fill in the details below. Your Freighter wallet will sign the
-                  transaction.
+                  {t("freelancer.submit.cardSubtitle")}
                 </p>
               </div>
 
-              {/* Wallet gate */}
               {!isConnected ? (
                 <div className="flex flex-col items-center justify-center py-16 px-6 gap-5">
                   <div className="w-16 h-16 rounded-full bg-primary-container flex items-center justify-center">
@@ -302,9 +285,9 @@ export default function FreelancerPage() {
                     </span>
                   </div>
                   <div className="text-center">
-                    <p className="font-bold text-lg">Connect your wallet first</p>
+                    <p className="font-bold text-lg">{t("freelancer.submit.connectFirst")}</p>
                     <p className="text-sm text-on-surface-variant mt-1">
-                      You need Freighter to submit invoices on Stellar testnet.
+                      {t("freelancer.submit.connectFirstDesc")}
                     </p>
                   </div>
                   <button
@@ -315,12 +298,11 @@ export default function FreelancerPage() {
                     <span className="material-symbols-outlined text-[18px]">
                       account_balance_wallet
                     </span>
-                    Connect Freighter
+                    {t("freelancer.submit.connectFreighter")}
                   </button>
                 </div>
               ) : (
                 <>
-                  {/* Success confirmation banner */}
                   {confirmedId !== null && (
                     <div className="mx-6 mt-6 p-4 rounded-xl bg-[#dcfce7] border border-[#bbf7d0] text-[#15803d] dark:bg-[#14532d]/20 dark:border-[#166534]/30 dark:text-[#86efac] flex items-start gap-3">
                       <span className="material-symbols-outlined mt-0.5">
@@ -328,16 +310,13 @@ export default function FreelancerPage() {
                       </span>
                       <div>
                         <p className="font-bold text-sm">
-                          Invoice submitted successfully!
+                          {t("freelancer.submit.successTitle")}
                         </p>
-                        <p className="text-xs mt-0.5 opacity-90">
-                          Your invoice ID is{" "}
-                          <span className="font-mono font-bold">
-                            #{confirmedId.toString()}
-                          </span>
-                          . Switch to &quot;My Invoices&quot; to track its
-                          status.
-                        </p>
+                        <p className="text-xs mt-0.5 opacity-90"
+                          dangerouslySetInnerHTML={{
+                            __html: t("freelancer.submit.successDesc", { id: confirmedId.toString() })
+                          }}
+                        />
                       </div>
                       <button
                         onClick={() => setConfirmedId(null)}
@@ -351,20 +330,18 @@ export default function FreelancerPage() {
                     </div>
                   )}
 
-                  {/* Form */}
                   <form
                     id="submit-invoice-form"
                     onSubmit={handleSubmit}
                     className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6"
                     noValidate
                   >
-                    {/* Payer address — full width */}
                     <div className="md:col-span-2">
                       <label
                         htmlFor="field-payer"
                         className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-1.5"
                       >
-                        Payer Stellar Address
+                        {t("freelancer.submit.payerLabel")}
                       </label>
                       <input
                         id="field-payer"
@@ -390,13 +367,12 @@ export default function FreelancerPage() {
                       )}
                     </div>
 
-                    {/* Invoice Amount */}
                     <div>
                       <label
                         htmlFor="field-amount"
                         className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-1.5"
                       >
-                        Invoice Amount (USDC)
+                        {t("freelancer.submit.amountLabel")}
                       </label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm font-bold">
@@ -429,13 +405,12 @@ export default function FreelancerPage() {
                       )}
                     </div>
 
-                    {/* Due Date */}
                     <div>
                       <label
                         htmlFor="field-due-date"
                         className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-1.5"
                       >
-                        Due Date
+                        {t("freelancer.submit.dueDateLabel")}
                       </label>
                       <input
                         id="field-due-date"
@@ -463,13 +438,12 @@ export default function FreelancerPage() {
                       )}
                     </div>
 
-                    {/* Discount Rate */}
                     <div>
                       <label
                         htmlFor="field-discount"
                         className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-1.5"
                       >
-                        Discount Rate (%)
+                        {t("freelancer.submit.discountLabel")}
                       </label>
                       <div className="relative">
                         <input
@@ -502,16 +476,15 @@ export default function FreelancerPage() {
                         </p>
                       )}
                       <p className="text-[11px] text-on-surface-variant mt-1.5">
-                        The discount an LP earns for early payment (e.g. 5 = 5%).
+                        {t("freelancer.submit.discountHint")}
                       </p>
                     </div>
 
-                    {/* Preview pill — shown when form has values */}
                     {form.amount && form.discountRate && (
                       <div className="md:col-span-2 bg-primary-container/30 border border-primary/10 rounded-xl px-5 py-4 flex flex-wrap gap-6">
                         <div>
                           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                            You receive (net)
+                            {t("freelancer.submit.preview.youReceive")}
                           </p>
                           <p className="font-bold mt-0.5">
                             {(() => {
@@ -524,7 +497,7 @@ export default function FreelancerPage() {
                         </div>
                         <div>
                           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                            LP yield
+                            {t("freelancer.submit.preview.lpYield")}
                           </p>
                           <p className="font-bold mt-0.5 text-primary">
                             {(() => {
@@ -537,17 +510,16 @@ export default function FreelancerPage() {
                         {form.dueDate && (
                           <div>
                             <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                              Due
+                              {t("freelancer.submit.preview.due")}
                             </p>
                             <p className="font-bold mt-0.5">
-                              {new Date(form.dueDate).toLocaleDateString()}
+                              {new Date(form.dueDate).toLocaleDateString(getLocale())}
                             </p>
                           </div>
                         )}
                       </div>
                     )}
 
-                    {/* Submit button — full width */}
                     <div className="md:col-span-2">
                       <button
                         id="submit-invoice-btn"
@@ -558,14 +530,14 @@ export default function FreelancerPage() {
                         {isSubmitting ? (
                           <>
                             <span className="w-4 h-4 border-2 border-surface-container-lowest border-t-transparent rounded-full animate-spin" />
-                            Submitting to Stellar…
+                            {t("freelancer.submit.submittingToStellar")}
                           </>
                         ) : (
                           <>
                             <span className="material-symbols-outlined text-[18px]">
                               send
                             </span>
-                            Submit Invoice
+                            {t("freelancer.tabs.submitInvoice")}
                           </>
                         )}
                       </button>
@@ -576,23 +548,18 @@ export default function FreelancerPage() {
             </div>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════════════
-              SCREEN 2 — My Invoices
-          ════════════════════════════════════════════════════════════════════ */}
           {screen === "my-invoices" && (
             <div className="bg-surface-container-lowest rounded-2xl shadow-xl border border-outline-variant/10 overflow-hidden min-h-[400px]">
-              {/* Card header */}
               <div className="p-6 border-b border-surface-dim flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-bold flex items-center gap-2">
                     <span className="material-symbols-outlined text-primary">
                       receipt_long
                     </span>
-                    My Invoices
+                    {t("freelancer.invoices.title")}
                   </h2>
                   <p className="text-sm text-on-surface-variant mt-1">
-                    Showing invoices submitted by your wallet. Auto-refreshes
-                    every 30 s.
+                    {t("freelancer.invoices.subtitle")}
                   </p>
                 </div>
                 <button
@@ -608,11 +575,10 @@ export default function FreelancerPage() {
                   >
                     refresh
                   </span>
-                  Refresh
+                  {t("common.refresh")}
                 </button>
               </div>
 
-              {/* Wallet gate */}
               {!isConnected ? (
                 <div className="flex flex-col items-center justify-center py-16 px-6 gap-5">
                   <div className="w-16 h-16 rounded-full bg-primary-container flex items-center justify-center">
@@ -622,10 +588,10 @@ export default function FreelancerPage() {
                   </div>
                   <div className="text-center">
                     <p className="font-bold text-lg">
-                      Connect your wallet to view invoices
+                      {t("freelancer.invoices.connectToView")}
                     </p>
                     <p className="text-sm text-on-surface-variant mt-1">
-                      Only invoices submitted from your address are shown.
+                      {t("freelancer.invoices.connectDesc")}
                     </p>
                   </div>
                   <button
@@ -636,30 +602,24 @@ export default function FreelancerPage() {
                     <span className="material-symbols-outlined text-[18px]">
                       account_balance_wallet
                     </span>
-                    Connect Freighter
+                    {t("freelancer.submit.connectFreighter")}
                   </button>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <div className="px-6 pt-4">
+                  <div className="px-6 pt-4 flex flex-col gap-3">
                     <InvoiceFilterBar
                       filters={filters}
                       onFiltersChange={setFilters}
                       onClearFilters={clearFilters}
                       activeFilterCount={activeFilterCount}
                     />
+                    <ExportButton data={filteredInvoices} filenamePrefix="iln-freelancer-export" />
                   </div>
                   <table className="w-full text-left" id="my-invoices-table">
                     <thead className="bg-surface-container-low">
                       <tr>
-                        {[
-                          "ID",
-                          "Payer",
-                          "Amount",
-                          "Discount",
-                          "Due Date",
-                          "Status",
-                        ].map((h) => (
+                        {tableHeaders.map((h) => (
                           <th
                             key={h}
                             className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider whitespace-nowrap"
@@ -671,10 +631,18 @@ export default function FreelancerPage() {
                     </thead>
                     <tbody className="divide-y divide-surface-dim">
                       {loadingInvoices ? (
-                        Array.from({ length: 5 }).map((_, i) => (
-                          <SkeletonRow key={i} columns={FREELANCER_COLUMNS} />
-                        ))
-                      ) : filteredInvoices.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={6}
+                            className="px-6 py-14 text-center text-on-surface-variant italic"
+                          >
+                            <span className="flex items-center justify-center gap-2">
+                              <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                              Loading invoices from Stellar…
+                            </span>
+                          </td>
+                        </tr>
+                      ) : invoices.length === 0 ? (
                         <tr>
                           <td
                             colSpan={6}
