@@ -1,2 +1,2 @@
 // Re-export from canonical location
-export { useInvoices } from "../src/hooks/useInvoices";
+export { useInvoices, useInvoice, useFundInvoice } from "../src/hooks/useInvoices";

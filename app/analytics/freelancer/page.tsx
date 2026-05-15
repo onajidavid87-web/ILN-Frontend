@@ -8,8 +8,6 @@ import { useToast } from "@/context/ToastContext";
 import AnimatedNumber from "@/components/AnimatedNumber";
 import MetricCard from "@/components/analytics/MetricCard";
 import { ExportButton } from "@/components/ExportButton";
-import { EmptyState } from "@/components/EmptyState";
-import { FreelancerEmptyIllustration } from "@/components/illustrations/EmptyIllustrations";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { getAllInvoices, Invoice } from "@/utils/soroban";
 import {
@@ -99,7 +97,7 @@ export default function FreelancerAnalyticsPage() {
       addToast({
         type: "error",
         title: "Failed to load analytics",
-        description: "Please try again later",
+        message: "Please try again later",
       });
     }
   }, [address, addToast]);
@@ -179,11 +177,15 @@ export default function FreelancerAnalyticsPage() {
               </p>
             </div>
 
-            <EmptyState
-              title="No invoices submitted yet"
-              description="Submit your first invoice to see analytics on your earnings and liquidity access"
-              icon="article"
-            />
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <span className="material-symbols-outlined text-5xl text-on-surface-variant/30 block mb-4">
+                article
+              </span>
+              <p className="font-medium text-on-surface">No invoices submitted yet</p>
+              <p className="mt-1 text-sm text-on-surface-variant">
+                Submit your first invoice to see analytics on your earnings and liquidity access
+              </p>
+            </div>
           </div>
         </main>
         <Footer />
@@ -232,7 +234,7 @@ export default function FreelancerAnalyticsPage() {
             </div>
             <ExportButton
               data={invoices}
-              filename="freelancer-analytics"
+              filenamePrefix="freelancer-analytics"
             />
           </div>
 
@@ -243,14 +245,10 @@ export default function FreelancerAnalyticsPage() {
               icon="receipt_long"
               label="Total Invoiced"
               value={
-                <span className="inline-flex items-baseline gap-1">
-                  <span>$</span>
-                  <AnimatedNumber
-                    value={Number(metrics.totalInvoiced) / 10_000_000}
-                    prefix=""
-                    decimals={2}
-                  />
-                </span>
+                <AnimatedNumber
+                  value={Number(metrics.totalInvoiced) / 10_000_000}
+                  formatter={(v) => `$${v.toFixed(2)}`}
+                />
               }
               accent
             />
@@ -260,14 +258,10 @@ export default function FreelancerAnalyticsPage() {
               icon="savings"
               label="Liquidity Received"
               value={
-                <span className="inline-flex items-baseline gap-1">
-                  <span>$</span>
-                  <AnimatedNumber
-                    value={Number(metrics.totalLiquidityReceived) / 10_000_000}
-                    prefix=""
-                    decimals={2}
-                  />
-                </span>
+                <AnimatedNumber
+                  value={Number(metrics.totalLiquidityReceived) / 10_000_000}
+                  formatter={(v) => `$${v.toFixed(2)}`}
+                />
               }
             />
 
@@ -276,14 +270,10 @@ export default function FreelancerAnalyticsPage() {
               icon="discount"
               label="Total Discount Cost"
               value={
-                <span className="inline-flex items-baseline gap-1">
-                  <span>$</span>
-                  <AnimatedNumber
-                    value={Number(metrics.totalDiscountCost) / 10_000_000}
-                    prefix=""
-                    decimals={2}
-                  />
-                </span>
+                <AnimatedNumber
+                  value={Number(metrics.totalDiscountCost) / 10_000_000}
+                  formatter={(v) => `$${v.toFixed(2)}`}
+                />
               }
             />
 
@@ -294,8 +284,7 @@ export default function FreelancerAnalyticsPage() {
               value={
                 <AnimatedNumber
                   value={metrics.avgDiscountRate}
-                  suffix="%"
-                  decimals={2}
+                  formatter={(v) => `${v.toFixed(2)}%`}
                 />
               }
             />
@@ -307,8 +296,7 @@ export default function FreelancerAnalyticsPage() {
               value={
                 <AnimatedNumber
                   value={metrics.fundedRate}
-                  suffix="%"
-                  decimals={1}
+                  formatter={(v) => `${v.toFixed(1)}%`}
                 />
               }
             />

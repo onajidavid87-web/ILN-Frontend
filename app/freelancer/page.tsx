@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import Navbar from "../../components/Navbar";
 import Footer from "../../components/Footer";
 import InvoiceFilterBar from "../../components/InvoiceFilterBar";
@@ -28,10 +29,6 @@ import { FreelancerEmptyIllustration } from "../../components/illustrations/Empt
 const server = new rpc.Server(RPC_URL);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-import { useTranslation } from "react-i18next";
-
-const server = new rpc.Server(RPC_URL);
 
 type Screen = "submit" | "my-invoices";
 
@@ -75,7 +72,14 @@ function StatusBadge({ status }: { status: string }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function FreelancerPage() {
-export default function FreelancerPage() {
+  return (
+    <Suspense fallback={null}>
+      <FreelancerPageContent />
+    </Suspense>
+  );
+}
+
+function FreelancerPageContent() {
   const { t, i18n } = useTranslation();
   const getLocale = () => i18n.language === "es" ? "es-ES" : "en-US";
   const { address, isConnected, connect } = useWallet();
@@ -140,23 +144,6 @@ export default function FreelancerPage() {
   function validate(): boolean {
     const next: Partial<FormState> = {};
     if (!form.payer.trim() || form.payer.trim().length < 56) {
-      next.payer = "Enter a valid Stellar address (56 characters).";
-    }
-    const amt = parseFloat(form.amount);
-    if (!form.amount || isNaN(amt) || amt <= 0) {
-      next.amount = "Enter a positive USDC amount.";
-    }
-    if (!form.dueDate) {
-      next.dueDate = "Select a due date.";
-    } else if (new Date(form.dueDate) <= new Date()) {
-      next.dueDate = "Due date must be in the future.";
-    }
-    const rate = parseFloat(form.discountRate);
-    if (!form.discountRate || isNaN(rate) || rate < 0 || rate > 100) {
-      next.discountRate = "Enter a discount rate between 0 and 100.";
-  function validate(): boolean {
-    const next: Partial<FormState> = {};
-    if (!form.payer.trim() || form.payer.trim().length < 56) {
       next.payer = t("freelancer.validation.payerRequired");
     }
     const amt = parseFloat(form.amount);
@@ -186,17 +173,6 @@ export default function FreelancerPage() {
     if (!validate()) return;
 
     setIsSubmitting(true);
-    const toastId = addToast({ type: "pending", title: "Submitting Invoice…" });
-
-    try {
-      // Convert amount (USDC decimal) → stroops (× 10_000_000)
-      const amountStroops = BigInt(Math.round(parseFloat(form.amount) * 10_000_000));
-      // Convert due date string to unix seconds
-      const dueDateUnix = Math.floor(new Date(form.dueDate).getTime() / 1000);
-      // Convert percent → basis-points×100 (contract expects rate * 100, e.g. 5% → 500)
-      const discountBps = Math.round(parseFloat(form.discountRate) * 100);
-
-      const { tx, invoiceId } = await submitInvoice({
     const toastId = addToast({ type: "pending", title: t("freelancer.toast.submitting") });
 
     try {
@@ -220,35 +196,26 @@ export default function FreelancerPage() {
       if ((sendResult as any).status === "PENDING") {
         let txStatus = await server.getTransaction((sendResult as any).hash);
         let tries = 0;
-        while (
-          (txStatus as any).status === "NOT_FOUND" &&
-          tries < 20
-        ) {
+        while ((txStatus as any).status === "NOT_FOUND" && tries < 20) {
           await new Promise((r) => setTimeout(r, 1500));
           txStatus = await server.getTransaction((sendResult as any).hash);
           tries++;
         }
 
-        setConfirmedId(invoiceId);
         setConfirmedId(null);
         setForm(EMPTY_FORM);
         setErrors({});
         updateToast(toastId, {
           type: "success",
-          title: "Invoice Submitted!",
           title: t("freelancer.toast.submitted"),
           txHash: (sendResult as any).hash,
         });
       } else {
-        throw new Error(
-          `Transaction rejected: ${(sendResult as any).status}`
-        );
+        throw new Error(`Transaction rejected: ${(sendResult as any).status}`);
       }
     } catch (err: any) {
       updateToast(toastId, {
         type: "error",
-        title: "Submission Failed",
-        message: err?.message ?? "An unknown error occurred.",
         title: t("freelancer.toast.submissionFailed"),
         message: err?.message ?? t("freelancer.toast.unknownError"),
       });
@@ -276,20 +243,6 @@ export default function FreelancerPage() {
           {/* ── Page Header ──────────────────────────────────────────────────── */}
           <div className="mb-8">
             <p className="text-sm font-bold uppercase tracking-widest text-primary mb-2">
-              Freelancer Portal
-            </p>
-            <h1 className="text-4xl font-bold tracking-tight mb-3">
-              Invoice Dashboard
-            </h1>
-            <p className="text-on-surface-variant max-w-xl">
-              Submit unpaid invoices to the ILN protocol and get paid early by
-              liquidity providers — all on Stellar testnet.
-            </p>
-          </div>
-
-          {/* ── Tab switcher ─────────────────────────────────────────────────── */}
-          <div className="mb-8">
-            <p className="text-sm font-bold uppercase tracking-widest text-primary mb-2">
               {t("submitForm.freelancerPortal")}
             </p>
             <h1 className="text-4xl font-bold tracking-tight mb-3">
@@ -315,21 +268,6 @@ export default function FreelancerPage() {
                     : "text-on-surface-variant hover:bg-surface-variant/30"
                 }`}
               >
-                {s === "submit" ? (
-                  <span className="flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[18px]">
-                      add_circle
-                    </span>
-                    Submit Invoice
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[18px]">
-                      receipt_long
-                    </span>
-                    My Invoices
-                  </span>
-                )}
                 <span className="flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-[18px]">
                     {s === "submit" ? "add_circle" : "receipt_long"}
@@ -345,23 +283,9 @@ export default function FreelancerPage() {
           ════════════════════════════════════════════════════════════════════ */}
           {screen === "submit" && (
             <div className="bg-surface-container-lowest rounded-2xl shadow-xl border border-outline-variant/10 overflow-hidden">
-              {/* Card header */}
-          {screen === "submit" && (
-            <div className="bg-surface-container-lowest rounded-2xl shadow-xl border border-outline-variant/10 overflow-hidden">
               <div className="p-6 border-b border-surface-dim">
                 <h2 className="text-xl font-bold flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary">
-                    send
-                  </span>
-                  Submit a New Invoice
-                </h2>
-                <p className="text-sm text-on-surface-variant mt-1">
-                  Fill in the details below. Your Freighter wallet will sign the
-                  transaction.
-                </p>
-              </div>
-
-              {/* Wallet gate */}
+                  <span className="material-symbols-outlined text-primary">send</span>
                   {t("freelancer.submit.cardTitle")}
                 </h2>
                 <p className="text-sm text-on-surface-variant mt-1">
@@ -377,9 +301,6 @@ export default function FreelancerPage() {
                     </span>
                   </div>
                   <div className="text-center">
-                    <p className="font-bold text-lg">Connect your wallet first</p>
-                    <p className="text-sm text-on-surface-variant mt-1">
-                      You need Freighter to submit invoices on Stellar testnet.
                     <p className="font-bold text-lg">{t("freelancer.submit.connectFirst")}</p>
                     <p className="text-sm text-on-surface-variant mt-1">
                       {t("freelancer.submit.connectFirstDesc")}
@@ -390,10 +311,7 @@ export default function FreelancerPage() {
                     onClick={connect}
                     className="bg-primary text-surface-container-lowest px-8 py-3 rounded-xl text-sm font-bold shadow-md hover:bg-primary/90 transition-all active:scale-95 flex items-center gap-2"
                   >
-                    <span className="material-symbols-outlined text-[18px]">
-                      account_balance_wallet
-                    </span>
-                    Connect Freighter
+                    <span className="material-symbols-outlined text-[18px]">account_balance_wallet</span>
                     {t("freelancer.submit.connectFreighter")}
                   </button>
                 </div>
@@ -402,21 +320,9 @@ export default function FreelancerPage() {
                   {/* Success confirmation banner */}
                   {confirmedId !== null && (
                     <div className="mx-6 mt-6 p-4 rounded-xl bg-[#dcfce7] border border-[#bbf7d0] text-[#15803d] dark:bg-[#14532d]/20 dark:border-[#166534]/30 dark:text-[#86efac] flex items-start gap-3">
-                      <span className="material-symbols-outlined mt-0.5">
-                        check_circle
-                      </span>
+                      <span className="material-symbols-outlined mt-0.5">check_circle</span>
                       <div>
                         <p className="font-bold text-sm">
-                          Invoice submitted successfully!
-                        </p>
-                        <p className="text-xs mt-0.5 opacity-90">
-                          Your invoice ID is{" "}
-                          <span className="font-mono font-bold">
-                            #{confirmedId.toString()}
-                          </span>
-                          . Switch to &quot;My Invoices&quot; to track its
-                          status.
-                        </p>
                           {t("freelancer.submit.successTitle")}
                         </p>
                         <p className="text-xs mt-0.5 opacity-90"
@@ -450,7 +356,6 @@ export default function FreelancerPage() {
                         htmlFor="field-payer"
                         className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-1.5"
                       >
-                        Payer Stellar Address
                         {t("freelancer.submit.payerLabel")}
                       </label>
                       <input
@@ -594,7 +499,6 @@ export default function FreelancerPage() {
                       <div className="md:col-span-2 bg-primary-container/30 border border-primary/10 rounded-xl px-5 py-4 flex flex-wrap gap-6">
                         <div>
                           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                            You receive (net)
                             {t("freelancer.submit.preview.youReceive")}
                           </p>
                           <p className="font-bold mt-0.5">
@@ -608,7 +512,6 @@ export default function FreelancerPage() {
                         </div>
                         <div>
                           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                            LP yield
                             {t("freelancer.submit.preview.lpYield")}
                           </p>
                           <p className="font-bold mt-0.5 text-primary">
@@ -622,16 +525,12 @@ export default function FreelancerPage() {
                         {form.dueDate && (
                           <div>
                             <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                              Due
-                            </p>
-                            <p className="font-bold mt-0.5">
-                              {new Date(form.dueDate).toLocaleDateString()}
                               {t("freelancer.submit.preview.due")}
                             </p>
-                            <p className="font-bold mt-0.5">
-                              {new Date(form.dueDate).toLocaleDateString(getLocale())}
-                            </p>
-                          </div>
+                             <p className="font-bold mt-0.5">
+                               {new Date(form.dueDate).toLocaleDateString(getLocale())}
+                             </p>
+                           </div>
                         )}
                       </div>
                     )}
@@ -647,15 +546,11 @@ export default function FreelancerPage() {
                         {isSubmitting ? (
                           <>
                             <span className="w-4 h-4 border-2 border-surface-container-lowest border-t-transparent rounded-full animate-spin" />
-                            Submitting to Stellar…
                             {t("freelancer.submit.submittingToStellar")}
                           </>
                         ) : (
                           <>
-                            <span className="material-symbols-outlined text-[18px]">
-                              send
-                            </span>
-                            Submit Invoice
+                            <span className="material-symbols-outlined text-[18px]">send</span>
                             {t("freelancer.tabs.submitInvoice")}
                           </>
                         )}

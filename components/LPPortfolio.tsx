@@ -5,8 +5,7 @@ import { formatAddress, formatDate, formatUSDC, calculateYield } from "../utils/
 import type { Invoice } from "../utils/soroban";
 import type { ApprovedToken } from "../hooks/useApprovedTokens";
 import InvoiceTable, { ColumnDefinition } from "./InvoiceTable";
-import { EmptyState } from "./EmptyState";
-import { LPPortfolioEmptyIllustration } from "./illustrations/EmptyIllustrations";
+
 import LPTokenMetricsCards from "./LPTokenMetricsCards";
 import WeeklyYieldChart from "./WeeklyYieldChart";
 import { calculatePerTokenMetrics } from "../utils/per-token-yield";
@@ -160,11 +159,15 @@ export default function LPPortfolio({
         columns={columns}
         isLoading={isLoading}
         emptyStateNode={
-          <EmptyState
-            title="Portfolio Empty"
-            description="You haven't funded any invoices yet."
-            illustration={<LPPortfolioEmptyIllustration />}
-          />
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <span className="material-symbols-outlined text-5xl text-on-surface-variant/30 block mb-4">
+              savings
+            </span>
+            <p className="font-medium text-on-surface">Portfolio Empty</p>
+            <p className="mt-1 text-sm text-on-surface-variant">
+              You haven&apos;t funded any invoices yet.
+            </p>
+          </div>
         }
         keyExtractor={(inv) => inv.id.toString()}
       />

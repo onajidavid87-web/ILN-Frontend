@@ -2,7 +2,7 @@
 
 import { rpc, TransactionBuilder } from "@stellar/stellar-sdk";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import InvoiceFilterBar from "../../components/InvoiceFilterBar";
 import Footer from "../../components/Footer";
 import Navbar from "../../components/Navbar";
@@ -249,6 +249,14 @@ function SortTh({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PayerDashboard() {
+  return (
+    <Suspense fallback={null}>
+      <PayerDashboardContent />
+    </Suspense>
+  );
+}
+
+function PayerDashboardContent() {
   const router = useRouter();
   const { address, isConnected, connect, signTx } = useWallet();
   const { addToast, updateToast } = useToast();

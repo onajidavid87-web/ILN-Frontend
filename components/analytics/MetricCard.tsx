@@ -4,7 +4,7 @@ interface MetricCardProps {
   id: string;
   icon: string;
   label: string;
-  value: string | number;
+  value: React.ReactNode;
   sub?: string;
   accent?: boolean;
 }

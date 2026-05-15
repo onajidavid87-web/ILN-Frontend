@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import React, { Suspense } from "react";
 import "./globals.css";
 import { ToastProvider } from "../context/ToastContext";
 import { WalletProvider } from "../context/WalletContext";
@@ -48,18 +49,6 @@ export default function RootLayout({
       <body
         className="antialiased bg-background text-foreground transition-colors duration-300 selection:bg-primary-container selection:text-on-primary-container"
       >
-        <ToastProvider>
-          <WalletProvider>
-            <div className="min-h-screen flex flex-col">
-              <NetworkBanner />
-              <div className="flex-1">
-                {children}
-              </div>
-            </div>
-            <OnboardingFlow />
-            <FABProvider />
-          </WalletProvider>
-        </ToastProvider>
         <Providers>
           <ToastProvider>
             <WalletProvider>
@@ -67,14 +56,20 @@ export default function RootLayout({
                 <div className="min-h-screen flex flex-col">
                   <NetworkBanner />
                   <div className="flex-1">
-                    {children}
+                    <Suspense fallback={null}>
+                      {children}
+                    </Suspense>
                   </div>
                 </div>
-                <OnboardingFlow />
+                <Suspense fallback={null}>
+                  <OnboardingFlow />
+                </Suspense>
               </NotificationProvider>
             </WalletProvider>
           </ToastProvider>
-          <CommandPalette />
+          <Suspense fallback={null}>
+            <CommandPalette />
+          </Suspense>
         </Providers>
       </body>
     </html>

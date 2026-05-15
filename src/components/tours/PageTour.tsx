@@ -9,7 +9,7 @@
  */
 
 import React, { useCallback, useState } from "react";
-import Joyride, { type CallBackProps, STATUS, type Step } from "react-joyride";
+import { Joyride, type EventData, STATUS, type Step } from "react-joyride";
 import { TOURS, type TourId } from "./tourDefinitions";
 
 interface PageTourProps {
@@ -29,7 +29,7 @@ export function PageTour({ tourId, run, onFinish }: PageTourProps) {
   }));
 
   const handleCallback = useCallback(
-    (data: CallBackProps) => {
+    (data: EventData) => {
       const { status } = data;
       if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
         onFinish();
@@ -43,16 +43,14 @@ export function PageTour({ tourId, run, onFinish }: PageTourProps) {
       steps={steps}
       run={run}
       continuous
-      showSkipButton
-      showProgress
       scrollToFirstStep
-      disableOverlayClose={false}
-      callback={handleCallback}
-      styles={{
-        options: {
-          primaryColor: "#2563eb",
-          zIndex: 10000,
-        },
+      onEvent={handleCallback}
+      options={{
+        primaryColor: "#2563eb",
+        zIndex: 10000,
+        showProgress: true,
+        buttons: ["back", "close", "primary", "skip"],
+        overlayClickAction: "close",
       }}
       locale={{
         skip: "Skip tour",

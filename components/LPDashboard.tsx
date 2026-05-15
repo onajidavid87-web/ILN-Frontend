@@ -11,10 +11,8 @@ import { useApprovedTokens } from "../hooks/useApprovedTokens";
 import { applyInvoiceFilters, useInvoiceFilters } from "../hooks/useInvoiceFilters";
 import { useInvoices } from "../hooks/useInvoices";
 import SkeletonRow, { LP_DISCOVERY_COLUMNS } from "./SkeletonRow";
-import { EmptyState } from "./EmptyState";
-import { LPDiscoveryEmptyIllustration, NotificationsEmptyIllustration } from "./illustrations/EmptyIllustrations";
+
 import {
-  buildApproveTokenTransaction,
   claimDefault,
   getAllInvoices,
   getTokenAllowance,
@@ -31,7 +29,8 @@ import { ExportButton } from "./ExportButton";
 import YieldCalculator from "./YieldCalculator";
 import LastUpdated from "./LastUpdated";
 import InvoiceStatusBadge from "./InvoiceStatusBadge";
-import type { ColumnDefinition } from "./DataTable";
+import FundConfirmModal from "./FundConfirmModal";
+import type { DataTableColumn } from "./DataTable";
 
 
 type Tab = "discovery" | "my-funded" | "watchlist";
@@ -80,26 +79,6 @@ export default function LPDashboard() {
       addToast({ type: "error", title: "Watchlist Error", message: error.message });
     }
   };
-
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const all = await getAllInvoices();
-      setInvoices(all);
-    } catch (error) {
-      console.error("Failed to fetch invoices", error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      void fetchData();
-    }, 0);
-
-    return () => clearTimeout(timer);
-  }, [fetchData]);
 
   const discoveryInvoicesList = useMemo(() => invoices.filter(i => i.status === "Pending"), [invoices]);
   const { scores: payerScores, risks: payerRisks } = usePayerScores(discoveryInvoicesList);
@@ -265,7 +244,7 @@ export default function LPDashboard() {
     }
   };
 
-  const commonColumns: ColumnDefinition<any>[] = [
+  const commonColumns: DataTableColumn<any>[] = [
     {
       id: "id",
       label: "ID",
@@ -325,7 +304,7 @@ export default function LPDashboard() {
     },
   ];
 
-  const discoveryColumns: ColumnDefinition<any>[] = [
+  const discoveryColumns: DataTableColumn<any>[] = [
     ...commonColumns,
     {
       id: "risk",
@@ -369,7 +348,7 @@ export default function LPDashboard() {
     },
   ];
 
-  const watchlistColumns: ColumnDefinition<any>[] = [
+  const watchlistColumns: DataTableColumn<any>[] = [
     ...commonColumns,
     {
       id: "watchAddedAt",
@@ -491,9 +470,9 @@ export default function LPDashboard() {
             // Set filters to match the calculator values
             setFilters({
               ...filters,
-              minAmount: amount,
-              discountRateMin: discountRate,
-              discountRateMax: discountRate + 50, // Allow some tolerance
+              minAmount: amount.toString(),
+              minDiscountBps: discountRate.toString(),
+              maxDiscountBps: (discountRate + 50).toString(), // Allow some tolerance
             });
           }}
         />
@@ -560,19 +539,19 @@ export default function LPDashboard() {
               ) : (activeTab === "discovery" ? discoveryInvoices : watchlistInvoices).length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-6 py-12">
-                    <EmptyState
-                      title={activeTab === "discovery" ? "No Pending Invoices" : "Watchlist Empty"}
-                      description={
-                        activeTab === "discovery"
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <span className="material-symbols-outlined text-5xl text-on-surface-variant/30 block mb-4">
+                        {activeTab === "discovery" ? "receipt_long" : "bookmark"}
+                      </span>
+                      <p className="font-medium text-on-surface">
+                        {activeTab === "discovery" ? "No Pending Invoices" : "Watchlist Empty"}
+                      </p>
+                      <p className="mt-1 text-sm text-on-surface-variant">
+                        {activeTab === "discovery"
                           ? "There are currently no active invoices waiting to be funded."
-                          : "You haven't added any invoices to your watchlist yet."
-                      }
-                      illustration={
-                        activeTab === "discovery" 
-                          ? <LPDiscoveryEmptyIllustration /> 
-                          : <NotificationsEmptyIllustration />
-                      }
-                    />
+                          : "You haven't added any invoices to your watchlist yet."}
+                      </p>
+                    </div>
                   </td>
                 </tr>
               ) : (
