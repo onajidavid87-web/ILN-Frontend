@@ -1,15 +1,54 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { TESTNET_USDC_TOKEN_ID } from "@/constants";
+import { TESTNET_EURC_TOKEN_ID, TESTNET_USDC_TOKEN_ID, TESTNET_XLM_TOKEN_ID } from "@/constants";
 import { getApprovedTokenIds, getTokenMetadata, type TokenMetadata } from "@/utils/soroban";
 
 export interface ApprovedToken extends TokenMetadata {
   iconLabel: string;
+  logo: string;
+  isAllowed: boolean;
+  unavailableReason?: string;
 }
+
+const KNOWN_TOKENS: TokenMetadata[] = [
+  {
+    contractId: TESTNET_USDC_TOKEN_ID,
+    name: "USD Coin",
+    symbol: "USDC",
+    decimals: 7,
+  },
+  {
+    contractId: TESTNET_EURC_TOKEN_ID,
+    name: "Euro Coin",
+    symbol: "EURC",
+    decimals: 7,
+  },
+  {
+    contractId: TESTNET_XLM_TOKEN_ID,
+    name: "Stellar Lumens",
+    symbol: "XLM",
+    decimals: 7,
+  },
+];
 
 function toIconLabel(symbol: string): string {
   return symbol.replace(/[^A-Z0-9]/gi, "").slice(0, 2).toUpperCase() || "TK";
+}
+
+function toLogo(symbol: string): string {
+  return `/tokens/${symbol.toLowerCase()}.svg`;
+}
+
+function toApprovedToken(token: TokenMetadata, allowedIds: Set<string>): ApprovedToken {
+  const isAllowed = allowedIds.has(token.contractId);
+  return {
+    ...token,
+    iconLabel: toIconLabel(token.symbol),
+    logo: toLogo(token.symbol),
+    isAllowed,
+    unavailableReason: isAllowed ? undefined : "This token is not currently approved for ILN invoices.",
+  };
 }
 
 export function useApprovedTokens() {
@@ -27,14 +66,14 @@ export function useApprovedTokens() {
       try {
         const tokenIds = await getApprovedTokenIds();
         const metadata = await Promise.all(tokenIds.map((tokenId) => getTokenMetadata(tokenId)));
+        const allowedIds = new Set(tokenIds);
+        const byContractId = new Map<string, TokenMetadata>();
+
+        KNOWN_TOKENS.forEach((token) => byContractId.set(token.contractId, token));
+        metadata.forEach((token) => byContractId.set(token.contractId, token));
 
         if (!cancelled) {
-          setTokens(
-            metadata.map((token) => ({
-              ...token,
-              iconLabel: toIconLabel(token.symbol),
-            })),
-          );
+          setTokens(Array.from(byContractId.values()).map((token) => toApprovedToken(token, allowedIds)));
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -60,7 +99,9 @@ export function useApprovedTokens() {
     [tokens],
   );
 
-  const defaultToken = tokens[0] ?? tokenMap.get(TESTNET_USDC_TOKEN_ID) ?? null;
+  const usdcToken = tokenMap.get(TESTNET_USDC_TOKEN_ID);
+  const defaultToken =
+    usdcToken?.isAllowed ? usdcToken : tokens.find((token) => token.isAllowed) ?? usdcToken ?? null;
 
   return {
     tokens,

@@ -223,6 +223,17 @@ export default function FundConfirmModal({ invoice, onClose, onSuccess }: FundCo
               </div>
 
               <div className="bg-surface-container-low rounded-2xl p-6 mb-8 border border-outline-variant/20 space-y-4">
+                {selectedInvoiceToken ? (
+                  <TokenSelector
+                    label="Invoice token"
+                    value={selectedInvoiceToken.contractId}
+                    tokens={tokens}
+                    readOnly
+                    showBalances
+                    hint="The invoice specifies this token, so LP funding must use the same asset."
+                  />
+                ) : null}
+
                 <div className="flex justify-between text-base">
                   <span className="text-on-surface-variant">You will send:</span>
                   <span className="font-bold text-xl">

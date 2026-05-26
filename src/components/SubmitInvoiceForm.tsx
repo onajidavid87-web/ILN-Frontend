@@ -54,7 +54,7 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
   const selectedToken = tokenMap.get(effectiveTokenId) ?? defaultToken ?? null;
   const preview = getYieldPreview(form.amount, form.discountRate, selectedToken?.decimals ?? 7);
   
-  const { addressBook, searchAddresses } = useAddressBook();
+  const { searchAddresses } = useAddressBook();
   const [addressBookOpen, setAddressBookOpen] = useState(false);
   const [addressBookQuery, setAddressBookQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -311,6 +311,7 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
               tooltip="The currency for this invoice. Currently supported: USDC, EURC, XLM."
               value={effectiveTokenId}
               tokens={tokens}
+              showBalances
               error={errors.tokenId}
               disabled={tokensLoading || isSubmitting}
               onChange={(value) => setField("tokenId", value)}
@@ -340,10 +341,10 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
 
               <Field 
                 label="Due date" 
-                tooltip="The date by which the payer must settle. LPs can claim a default if this passes without payment."
                 error={errors.dueDate}
               >
                 <input
+                  aria-label="Due date"
                   value={form.dueDate}
                   onChange={(event) => setField("dueDate", event.target.value)}
                   min={getMinimumDueDate()}
