@@ -463,6 +463,42 @@ export async function markPaid(payer: string, invoice_id: bigint) {
   return rpc.assembleTransaction(tx, sim).build();
 }
 
+export async function appealDefault(
+  payer: string,
+  invoice_id: bigint,
+  evidence_hash: string
+) {
+  const params: xdr.ScVal[] = [
+    nativeToScVal(invoice_id, { type: "u64" }),
+    nativeToScVal(evidence_hash),
+  ];
+  const account = await server.getAccount(payer);
+  const tx = new TransactionBuilder(account, {
+    fee: "10000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeHostFunction({
+        func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+          new xdr.InvokeContractArgs({
+            contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+            functionName: "appeal_default",
+            args: params,
+          })
+        ),
+        auth: [],
+      })
+    )
+    .setTimeout(60 * 5)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (!rpc.Api.isSimulationSuccess(sim)) {
+    throw new Error(`Simulation failed: ${sim.error}`);
+  }
+  return rpc.assembleTransaction(tx, sim).build();
+}
+
 // ─── Write: claim default ─────────────────────────────────────────────────────
 
 export async function claimDefault(funder: string, invoice_id: bigint) {
