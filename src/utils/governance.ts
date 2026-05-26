@@ -2,8 +2,15 @@
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type ProposalType = "ParameterUpdate" | "ProtocolUpgrade" | "TextProposal";
-export type ProposalStatus = "Active" | "Passed" | "Failed" | "Executed" | "Pending";
+export type ProposalStatus = "Active" | "Passed" | "Failed" | "Executed" | "Pending" | "Vetoed";
 export type VoteChoice = "For" | "Against" | "Abstain";
+
+export interface VetoRecord {
+  proposalId: number;
+  admin: string;
+  reasonHash: string;
+  createdAt: number;
+}
 
 export interface ParameterChange {
   parameter: string;
@@ -28,6 +35,7 @@ export interface Proposal {
   quorumRequired: number;
   parameterChanges?: ParameterChange[];
   userVote?: VoteChoice;
+  vetoHistory?: VetoRecord[];
 }
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
@@ -188,6 +196,7 @@ export function formatVotingPower(power: number): string {
 // ─── Mock voting state (per-session in-memory store) ──────────────────────────
 
 const userVotes: Map<number, VoteChoice> = new Map();
+const vetoHistory: VetoRecord[] = [];
 
 export function getUserVote(proposalId: number): VoteChoice | undefined {
   return userVotes.get(proposalId);
@@ -201,6 +210,7 @@ export async function fetchProposals(): Promise<Proposal[]> {
   return MOCK_PROPOSALS.map((p) => ({
     ...p,
     userVote: userVotes.get(p.id),
+    vetoHistory: getVetoHistory(p.id),
   }));
 }
 
@@ -208,7 +218,7 @@ export async function fetchProposal(id: number): Promise<Proposal | null> {
   await new Promise((r) => setTimeout(r, 300));
   const proposal = MOCK_PROPOSALS.find((p) => p.id === id);
   if (!proposal) return null;
-  return { ...proposal, userVote: userVotes.get(id) };
+  return { ...proposal, userVote: userVotes.get(id), vetoHistory: getVetoHistory(id) };
 }
 
 export async function castVote(
@@ -248,6 +258,34 @@ export async function executeProposal(
   }
 
   return Math.random().toString(16).substring(2, 18);
+}
+
+export async function vetoProposal(
+  proposalId: number,
+  reasonHash: string,
+  adminAddress: string,
+  _signTx: (xdr: string) => Promise<string>
+): Promise<string> {
+  await new Promise((r) => setTimeout(r, 1200));
+
+  const proposal = MOCK_PROPOSALS.find((p) => p.id === proposalId);
+  if (!proposal) throw new Error("Proposal not found");
+
+  proposal.status = "Vetoed";
+  const record: VetoRecord = {
+    proposalId,
+    admin: adminAddress,
+    reasonHash,
+    createdAt: Math.floor(Date.now() / 1000),
+  };
+  vetoHistory.unshift(record);
+  proposal.vetoHistory = [record, ...(proposal.vetoHistory ?? [])];
+
+  return Math.random().toString(16).substring(2, 18);
+}
+
+export function getVetoHistory(proposalId: number): VetoRecord[] {
+  return vetoHistory.filter((record) => record.proposalId === proposalId);
 }
 
 export async function getVotingPower(_address: string): Promise<number> {

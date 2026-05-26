@@ -1,252 +1,153 @@
 "use client";
 
-import { rpc, TransactionBuilder } from "@stellar/stellar-sdk";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
-import InvoiceFilterBar from "@/components/InvoiceFilterBar";
 import Footer from "@/components/Footer";
 import Navbar from "@/components/Navbar";
-import DueDateCountdown from "@/components/DueDateCountdown";
-import { RPC_URL } from "@/constants";
+import { TokenAmount, TokenIcon } from "@/components/TokenSelector";
 import { useToast } from "@/context/ToastContext";
 import { useWallet } from "@/context/WalletContext";
 import { useApprovedTokens } from "@/hooks/useApprovedTokens";
-import { applyInvoiceFilters, useInvoiceFilters } from "@/hooks/useInvoiceFilters";
+import { APPEAL_WINDOW_LEDGERS, formatLedgerWindow, hashEvidence } from "@/utils/evidence";
 import { formatAddress, formatDate, formatTokenAmount } from "@/utils/format";
-import { getAllInvoices, Invoice, markPaid } from "@/utils/soroban";
-import TokenSelector, { TokenAmount } from "@/components/TokenSelector";
-import InvoiceTable, { ColumnDefinition } from "@/components/InvoiceTable";
+import {
+  Invoice,
+  appealDefault,
+  getAllInvoices,
+  markPaid,
+  submitSignedTransaction,
+} from "@/utils/soroban";
 
-const server = new rpc.Server(RPC_URL);
+type PayerTab = "Outstanding" | "Settled" | "Pending" | "Disputed";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function daysRemaining(dueDateTimestamp: bigint): number {
-  const nowMs = Date.now();
-  const dueMs = Number(dueDateTimestamp) * 1000;
-  return Math.ceil((dueMs - nowMs) / (1000 * 60 * 60 * 24));
+interface AppealState {
+  invoice: Invoice;
+  evidence: string;
+  evidenceHash: string;
+  submitting: boolean;
 }
 
-function isOverdue(dueDateTimestamp: bigint): boolean {
-  return daysRemaining(dueDateTimestamp) < 0;
+const TABS: PayerTab[] = ["Outstanding", "Settled", "Pending", "Disputed"];
+
+function isOverdue(invoice: Invoice): boolean {
+  return Number(invoice.due_date) * 1000 < Date.now() && invoice.status !== "Paid";
 }
 
-function DaysChip({ due_date }: { due_date: bigint }) {
-  const days = daysRemaining(due_date);
-  const overdue = days < 0;
+function invoiceTab(invoice: Invoice): PayerTab {
+  if (invoice.status === "Paid" || invoice.status === "Appealed") return "Settled";
+  if (invoice.status === "Disputed" || invoice.status === "Expired" || invoice.status === "Defaulted") {
+    return "Disputed";
+  }
+  if (invoice.status === "Funded") return "Outstanding";
+  return "Pending";
+}
+
+function disputeMeta(invoice: Invoice) {
+  const id = invoice.id.toString().padStart(4, "0");
+  const expired = invoice.status === "Expired" || invoice.status === "Defaulted";
+  return {
+    evidenceHash: `0x${id}evidence${id}`.padEnd(18, "0"),
+    voteLink: `/governance/${Number(invoice.id) || 1}`,
+    disputeDate: formatDate(invoice.due_date),
+    timeout: expired ? "Expired" : "2d 8h remaining",
+    ruling: expired ? "Ruling: Dismissed" : invoice.status === "Disputed" ? "Resolution pending" : "Ruling: Resolved",
+  };
+}
+
+function StatusPill({ invoice }: { invoice: Invoice }) {
+  const overdue = isOverdue(invoice);
+  const label = overdue && invoice.status === "Funded" ? "Overdue" : invoice.status;
+  const color =
+    label === "Paid" || label === "Appealed"
+      ? "bg-emerald-500/15 text-emerald-600 border-emerald-500/30"
+      : label === "Overdue" || label === "Expired" || label === "Defaulted"
+        ? "bg-red-500/15 text-red-600 border-red-500/30"
+        : label === "Disputed"
+          ? "bg-amber-500/15 text-amber-600 border-amber-500/30"
+          : "bg-primary/15 text-primary border-primary/30";
 
   return (
-    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-      overdue ? "bg-red-100 text-red-700" : "bg-primary-container text-on-primary-container"
-    }`}>
-      {overdue ? `${Math.abs(days)}d overdue` : `${days}d remaining`}
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${color}`}>
+      {label}
     </span>
   );
 }
 
-// ─── Settle confirmation modal ────────────────────────────────────────────────
-
-interface SettleModalProps {
-  invoice: Invoice;
-  token: ReturnType<typeof useApprovedTokens>["tokens"][number] | null;
-  isSettling: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}
-
-function SettleConfirmModal({
-  invoice,
-  token,
-  isSettling,
-  onConfirm,
-  onCancel,
-}: SettleModalProps) {
-  const overdue = isOverdue(invoice.due_date);
-
+function EmptyState({ connected, tab }: { connected: boolean; tab: PayerTab }) {
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-      <div className="bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant/20 w-full max-w-md overflow-hidden">
-        {/* Header */}
-        <div className="p-6 border-b border-outline-variant/10">
-          <h4 className="text-xl font-bold flex items-center gap-2">
-            <span
-              className="material-symbols-outlined text-primary text-[22px]"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              payments
-            </span>
-            Settle Invoice #{invoice.id.toString()}
-          </h4>
-          <p className="text-sm text-on-surface-variant mt-1">
-            Review the details before confirming.
-          </p>
-        </div>
-
-        {/* Overdue warning */}
-        {overdue && (
-          <div className="mx-6 mt-5 rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3 flex items-start gap-2 text-xs text-red-500">
-            <span
-              className="material-symbols-outlined text-[16px] mt-0.5 shrink-0"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              warning
-            </span>
-            <span>
-              This invoice is{" "}
-              <strong>{Math.abs(daysRemaining(invoice.due_date))} days overdue.</strong>{" "}
-              Settling now clears your obligation.
-            </span>
-          </div>
-        )}
-
-        {/* Details */}
-        <div className="p-6 space-y-3">
-          <div className="rounded-xl bg-surface-container p-4 space-y-3 text-sm">
-            <Row label="Invoice ID" value={`#${invoice.id.toString()}`} mono />
-            <Row label="Freelancer" value={formatAddress(invoice.freelancer)} mono />
-            <Row label="Due Date" value={formatDate(invoice.due_date)} />
-            {token ? <Row label="Settlement token" value={token.symbol} bold /> : null}
-          </div>
-
-          <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm space-y-2">
-            <p className="text-xs font-bold uppercase tracking-widest text-primary mb-3">
-              Payment summary
-            </p>
-            <Row label="Amount you will send" value={token ? formatTokenAmount(invoice.amount, token) : invoice.amount.toString()} bold />
-            <p className="text-xs text-on-surface-variant pt-1">
-              The invoice token will be transferred from your wallet to the contract, which
-              immediately releases it to the liquidity provider.
-            </p>
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="p-6 pt-0 flex gap-3">
-          <button
-            disabled={isSettling}
-            onClick={onCancel}
-            className="flex-1 py-3 rounded-xl font-bold text-sm border border-outline-variant/40 text-on-surface-variant hover:bg-surface-container transition-colors disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            disabled={isSettling}
-            onClick={onConfirm}
-            className="flex-[2] py-3 rounded-xl font-bold text-sm bg-primary text-white hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 shadow-md"
-          >
-            {isSettling ? (
-              <>
-                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Settling…
-              </>
-            ) : (
-              <>
-                <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                Confirm & Settle
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Row({
-  label,
-  value,
-  mono,
-  bold,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  bold?: boolean;
-}) {
-  return (
-    <div className="flex justify-between items-center">
-      <span className="text-on-surface-variant">{label}</span>
-      <span className={`${mono ? "font-mono" : ""} ${bold ? "font-bold text-base" : "font-medium"}`}>
-        {value}
+    <div className="py-20 text-center">
+      <span className="material-symbols-outlined mb-4 block text-5xl text-on-surface-variant/30">
+        {connected ? "receipt_long" : "account_balance_wallet"}
       </span>
-    </div>
-  );
-}
-
-// ─── Empty state ──────────────────────────────────────────────────────────────
-
-function EmptyState({ connected }: { connected: boolean }) {
-  if (!connected) {
-    return (
-      <div className="text-center py-24">
-        <span className="material-symbols-outlined text-5xl text-on-surface-variant/30 block mb-4">
-          account_balance_wallet
-        </span>
-        <p className="text-on-surface-variant font-medium">
-          Connect your wallet to view your invoices
-        </p>
-      </div>
-    );
-  }
-  return (
-    <div className="text-center py-24">
-      <span className="material-symbols-outlined text-5xl text-on-surface-variant/30 block mb-4">
-        receipt_long
-      </span>
-      <p className="text-on-surface-variant font-medium">No funded invoices assigned to your address</p>
-      <p className="text-sm text-on-surface-variant/60 mt-1">
-        Invoices where you are the payer will appear here once funded.
+      <p className="font-medium text-on-surface-variant">
+        {connected ? `No ${tab.toLowerCase()} invoices found` : "Connect your wallet to view payer invoices"}
       </p>
     </div>
   );
 }
 
-// ─── Skeleton row ─────────────────────────────────────────────────────────────
-
-function SkeletonRow() {
-  return (
-    <tr>
-      {Array.from({ length: 6 }).map((_, i) => (
-        <td key={i} className="px-6 py-5">
-          <div className="h-4 bg-surface-container rounded animate-pulse" style={{ width: `${60 + i * 10}%` }} />
-        </td>
-      ))}
-    </tr>
-  );
-}
-
-// ─── Sort header ──────────────────────────────────────────────────────────────
-
-function SortTh({
-  label,
-  sortKey,
-  activeSortKey,
-  sortOrder,
-  onSort,
+function AppealDefaultModal({
+  state,
+  onEvidenceChange,
+  onSubmit,
+  onClose,
 }: {
-  label: string;
-  sortKey: keyof Invoice;
-  activeSortKey: keyof Invoice;
-  sortOrder: "asc" | "desc";
-  onSort: (k: keyof Invoice) => void;
+  state: AppealState;
+  onEvidenceChange: (evidence: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
 }) {
-  const active = sortKey === activeSortKey;
   return (
-    <th
-      className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider cursor-pointer select-none hover:text-primary transition-colors"
-      onClick={() => onSort(sortKey)}
-    >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        <span className="material-symbols-outlined text-[13px]">
-          {active ? (sortOrder === "asc" ? "arrow_upward" : "arrow_downward") : "unfold_more"}
-        </span>
-      </span>
-    </th>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+        <div className="border-b border-outline-variant/10 p-6">
+          <h2 className="text-xl font-bold">Appeal Default</h2>
+          <p className="mt-1 text-sm text-on-surface-variant">
+            Invoice #{state.invoice.id.toString()} will be appealed with a client-side evidence hash.
+          </p>
+        </div>
+        <div className="space-y-4 p-6">
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-on-surface-variant">
+            Appeal window remaining:{" "}
+            <span className="font-semibold text-amber-600">
+              {formatLedgerWindow(APPEAL_WINDOW_LEDGERS)}
+            </span>
+          </div>
+          <label className="block text-sm font-semibold text-on-surface">
+            Evidence
+            <textarea
+              value={state.evidence}
+              onChange={(event) => onEvidenceChange(event.target.value)}
+              className="mt-2 min-h-32 w-full rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-3 text-sm outline-none focus:border-primary"
+              placeholder="Summarize why this default should be appealed"
+            />
+          </label>
+          {state.evidenceHash && (
+            <p className="break-all rounded-lg bg-surface-container p-3 font-mono text-xs text-on-surface-variant">
+              evidence_hash: {state.evidenceHash}
+            </p>
+          )}
+        </div>
+        <div className="flex gap-3 p-6 pt-0">
+          <button
+            onClick={onClose}
+            disabled={state.submitting}
+            className="flex-1 rounded-xl border border-outline-variant/30 px-4 py-3 text-sm font-bold text-on-surface-variant disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={!state.evidenceHash || state.submitting}
+            className="flex-[2] rounded-xl bg-primary px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
+          >
+            {state.submitting ? "Submitting..." : "Submit Appeal"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PayerDashboard() {
   return (
@@ -257,643 +158,282 @@ export default function PayerDashboard() {
 }
 
 function PayerDashboardContent() {
-  const router = useRouter();
   const { address, isConnected, connect, signTx } = useWallet();
   const { addToast, updateToast } = useToast();
   const { tokenMap, defaultToken } = useApprovedTokens();
-
+  const [activeTab, setActiveTab] = useState<PayerTab>("Outstanding");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [isSettling, setIsSettling] = useState(false);
-  const [justPaid, setJustPaid] = useState<Set<string>>(new Set());
-  const [sortKey, setSortKey] = useState<keyof Invoice>("due_date");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
-  const {
-    filters,
-    setFilters,
-    clearFilters,
-    activeFilterCount,
-  } = useInvoiceFilters({ namespace: "payerInvoices" });
+  const [settlingId, setSettlingId] = useState<string | null>(null);
+  const [appealState, setAppealState] = useState<AppealState | null>(null);
 
-  const fetchData = useCallback(async () => {
+  const loadInvoices = useCallback(async () => {
     if (!isConnected || !address) return;
     setLoading(true);
     try {
       const all = await getAllInvoices();
-      setInvoices(all);
-    } catch (err) {
-      console.error("Failed to fetch invoices", err);
+      setInvoices(all.filter((invoice) => invoice.payer === address));
+    } catch (error) {
+      addToast({
+        type: "error",
+        title: "Could not load payer invoices",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
     } finally {
       setLoading(false);
     }
-  }, [isConnected, address]);
+  }, [addToast, address, isConnected]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      void fetchData();
-    }, 0);
+    void loadInvoices();
+  }, [loadInvoices]);
 
-    return () => clearTimeout(timer);
-  }, [fetchData]);
+  const totalsByToken = useMemo(() => {
+    return invoices
+      .filter((invoice) => invoiceTab(invoice) === "Outstanding")
+      .reduce((totals, invoice) => {
+        const tokenId = invoice.token ?? defaultToken?.contractId ?? "";
+        totals.set(tokenId, (totals.get(tokenId) ?? 0n) + invoice.amount);
+        return totals;
+      }, new Map<string, bigint>());
+  }, [defaultToken?.contractId, invoices]);
 
-  // ── Derived invoice list ──────────────────────────────────────────────────
-  const myInvoices = invoices.filter(
-    (inv) =>
-      inv.payer === address &&
-      (inv.status === "Funded" || justPaid.has(inv.id.toString()))
+  const visibleInvoices = useMemo(
+    () => invoices.filter((invoice) => invoiceTab(invoice) === activeTab),
+    [activeTab, invoices],
   );
 
-  const filteredInvoices = useMemo(
-    () =>
-      applyInvoiceFilters(myInvoices, filters, {
-        resolveTokenSymbol: (invoice) => {
-          const token = tokenMap.get(invoice.token ?? defaultToken?.contractId ?? "");
-          return token?.symbol ?? "USDC";
-        },
-      }),
-    [defaultToken?.contractId, filters, myInvoices, tokenMap],
-  );
-
-  const sortedInvoices = [...filteredInvoices].sort((a, b) => {
-    const av = a[sortKey] as string | number | bigint | undefined;
-    const bv = b[sortKey] as string | number | bigint | undefined;
-    if (av === undefined && bv === undefined) return 0;
-    if (av === undefined) return 1;
-    if (bv === undefined) return -1;
-    if (av < bv) return sortOrder === "asc" ? -1 : 1;
-    if (av > bv) return sortOrder === "asc" ? 1 : -1;
-    return 0;
-  });
-
-  const overdueCount = myInvoices.filter((inv) => isOverdue(inv.due_date)).length;
-  const totalsByToken = myInvoices.reduce((acc, inv) => {
-    if (justPaid.has(inv.id.toString())) {
-      return acc;
-    }
-
-    const tokenId = inv.token ?? defaultToken?.contractId ?? "";
-    acc.set(tokenId, (acc.get(tokenId) ?? 0n) + inv.amount);
-    return acc;
-  }, new Map<string, bigint>());
-
-  const toggleSort = (key: keyof Invoice) => {
-    if (sortKey === key) {
-      setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortOrder("asc");
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTableRowElement>, invoice: Invoice, index: number) => {
-    const rowElements = Array.from(e.currentTarget.parentElement?.querySelectorAll('tr[role="row"]') || []);
-
-    switch (e.key) {
-      case "ArrowDown":
-        e.preventDefault();
-        (rowElements[index + 1] as HTMLElement)?.focus();
-        break;
-      case "ArrowUp":
-        e.preventDefault();
-        (rowElements[index - 1] as HTMLElement)?.focus();
-        break;
-      case "Enter":
-        e.preventDefault();
-        router.push(`/i/${invoice.id.toString()}`);
-        break;
-      case "s":
-      case "S":
-        if (invoice.status === "Funded" && !justPaid.has(invoice.id.toString())) {
-          e.preventDefault();
-          setSelectedInvoice(invoice);
-        }
-        break;
-    }
-  };
-
-  // ── Settle handler ────────────────────────────────────────────────────────
-  const confirmSettle = async () => {
-    if (!selectedInvoice || !address) return;
-
-    setIsSettling(true);
-    const toastId = addToast({
-      type: "pending",
-      title: `Settling Invoice #${selectedInvoice.id}…`,
-    });
-
+  const handleSettle = async (invoice: Invoice) => {
+    if (!address) return;
+    setSettlingId(invoice.id.toString());
+    const toastId = addToast({ type: "pending", title: `Settling invoice #${invoice.id}...` });
     try {
-      const tx = await markPaid(address, selectedInvoice.id);
-      const signedXdr = await signTx(tx.toXDR());
-
-      const sendResult = await server.sendTransaction(
-        TransactionBuilder.fromXDR(signedXdr, "Test SDF Network ; September 2015")
+      const tx = await markPaid(address, invoice.id);
+      const { txHash } = await submitSignedTransaction({ tx, signTx });
+      updateToast(toastId, { type: "success", title: "Invoice settled", txHash });
+      setInvoices((current) =>
+        current.map((item) => (item.id === invoice.id ? { ...item, status: "Paid" } : item)),
       );
-
-      if (sendResult.status === "PENDING") {
-        let txStatus = await server.getTransaction(sendResult.hash);
-        while (txStatus.status === "NOT_FOUND") {
-          await new Promise((r) => setTimeout(r, 1000));
-          txStatus = await server.getTransaction(sendResult.hash);
-        }
-
-        if (txStatus.status === "SUCCESS") {
-          updateToast(toastId, {
-            type: "success",
-            title: `Invoice #${selectedInvoice.id} settled`,
-            txHash: sendResult.hash,
-          });
-
-          // Optimistic UI: mark paid locally before re-fetch
-          setJustPaid((prev) => new Set(prev).add(selectedInvoice.id.toString()));
-          setInvoices((prev) =>
-            prev.map((inv) =>
-              inv.id === selectedInvoice.id ? { ...inv, status: "Paid" } : inv
-            )
-          );
-          setSelectedInvoice(null);
-
-          // Background refresh
-          fetchData();
-        } else {
-          throw new Error(`Transaction failed: ${txStatus.status}`);
-        }
-      } else {
-        throw new Error(`Failed to send transaction: ${sendResult.status}`);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "An unknown error occurred";
+    } catch (error) {
       updateToast(toastId, {
         type: "error",
         title: "Settlement failed",
-        message,
+        message: error instanceof Error ? error.message : "Transaction rejected",
       });
     } finally {
-      setIsSettling(false);
+      setSettlingId(null);
     }
   };
 
-  const columns: ColumnDefinition<Invoice>[] = [
-    {
-      id: "id",
-      label: "ID",
-      isMandatory: true,
-      sortable: true,
-      renderCell: (inv) => {
-        const overdue = isOverdue(inv.due_date);
-        const paid = inv.status === "Paid" || justPaid.has(inv.id.toString());
-        return (
-          <span className={`font-bold text-sm ${overdue && !paid ? "text-red-500" : "text-primary"}`}>
-            #{inv.id.toString()}
-          </span>
-        );
-      },
-    },
-    {
-      id: "freelancer",
-      label: "Freelancer",
-      sortable: false,
-      renderCell: (inv) => (
-        <span className="text-sm font-mono text-on-surface-variant">
-          {formatAddress(inv.freelancer)}
-        </span>
-      ),
-    },
-    {
-      id: "amount",
-      label: "Amount Owed",
-      sortable: true,
-      renderCell: (inv) => {
-        const overdue = isOverdue(inv.due_date);
-        const paid = inv.status === "Paid" || justPaid.has(inv.id.toString());
-        return (
-          <span className={`font-bold text-sm ${overdue && !paid ? "text-red-500" : "text-on-surface"}`}>
-            <InvoiceAmount invoice={inv} amount={inv.amount} tokenMap={tokenMap} defaultToken={defaultToken} />
-          </span>
-        );
-      },
-    },
-    {
-      id: "due_date",
-      label: "Due Date",
-      sortable: true,
-      renderCell: (inv) => {
-        const paid = inv.status === "Paid" || justPaid.has(inv.id.toString());
-        return (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-sm text-on-surface">{formatDate(inv.due_date)}</span>
-            {!paid && <DaysChip due_date={inv.due_date} />}
-          </div>
-        );
-      },
-    },
-    {
-      id: "status",
-      label: "Status",
-      isMandatory: true,
-      sortable: false,
-      renderCell: (inv) => {
-        const overdue = isOverdue(inv.due_date);
-        const paid = inv.status === "Paid" || justPaid.has(inv.id.toString());
-        if (paid) {
-          return (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-xs font-semibold">
-              <span className="material-symbols-outlined text-[12px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                check_circle
-              </span>
-              Paid
-            </span>
-          );
-        }
-        if (overdue) {
-          return (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 text-red-500 border border-red-500/30 text-xs font-semibold">
-              <span className="material-symbols-outlined text-[12px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                error
-              </span>
-              Overdue
-            </span>
-          );
-        }
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/15 text-primary border border-primary/30 text-xs font-semibold">
-            <span className="material-symbols-outlined text-[12px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-              pending
-            </span>
-            Funded
-          </span>
-        );
-      },
-    },
-    {
-      id: "actions",
-      label: "Action",
-      sortable: false,
-      renderCell: (inv) => {
-        const paid = inv.status === "Paid" || justPaid.has(inv.id.toString());
-        if (paid) return null;
-        return (
-          <div className="text-right">
-            <button
-              onClick={() => setSelectedInvoice(inv)}
-              className="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface-variant text-xs font-bold hover:bg-primary hover:text-white transition-all shadow-sm active:scale-95"
-            >
-              Settle
-            </button>
-          </div>
-        );
-      },
-    },
-  ];
+  const updateAppealEvidence = async (evidence: string) => {
+    if (!appealState) return;
+    setAppealState({ ...appealState, evidence, evidenceHash: await hashEvidence(evidence) });
+  };
+
+  const submitAppeal = async () => {
+    if (!appealState || !address) return;
+    setAppealState({ ...appealState, submitting: true });
+    const toastId = addToast({ type: "pending", title: `Appealing invoice #${appealState.invoice.id}...` });
+    try {
+      const tx = await appealDefault(address, appealState.invoice.id, appealState.evidenceHash);
+      const { txHash } = await submitSignedTransaction({ tx, signTx });
+      updateToast(toastId, { type: "success", title: "Default appealed", txHash });
+      setInvoices((current) =>
+        current.map((item) => (item.id === appealState.invoice.id ? { ...item, status: "Appealed" } : item)),
+      );
+      setAppealState(null);
+    } catch (error) {
+      updateToast(toastId, {
+        type: "error",
+        title: "Appeal failed",
+        message: error instanceof Error ? error.message : "Transaction rejected",
+      });
+      setAppealState({ ...appealState, submitting: false });
+    }
+  };
 
   return (
-    <main id="payer-settlement-page" className="min-h-screen">
+    <main className="min-h-screen">
       <Navbar />
-
-      {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section className="pt-32 pb-10 px-8 border-b border-outline-variant/10 bg-surface-container-lowest">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-widest text-primary mb-2">
-                Payer Dashboard
-              </p>
-              <h1 className="text-4xl md:text-5xl font-headline mb-3">
-                My Invoices
-              </h1>
-              <p className="text-on-surface-variant max-w-xl text-base leading-relaxed">
-                Funded invoices assigned to your address. Settle them on-chain
-                with a single click using your Freighter wallet.
-              </p>
-            </div>
-
-            {isConnected ? (
-              <button
-                onClick={fetchData}
-                disabled={loading}
-                className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-outline-variant/30 text-sm font-medium text-on-surface-variant hover:border-primary/40 hover:text-primary transition-colors disabled:opacity-50"
-              >
-                <span
-                  className={`material-symbols-outlined text-[18px] ${loading ? "animate-spin" : ""}`}
-                >
-                  refresh
-                </span>
-                Refresh
-              </button>
-            ) : (
-              <button
-                onClick={connect}
-                className="shrink-0 inline-flex items-center gap-2 bg-primary text-white px-5 py-3 rounded-xl text-sm font-bold shadow-md hover:bg-primary/90 active:scale-95 transition-all"
-              >
-                <span className="material-symbols-outlined text-[18px]">account_balance_wallet</span>
-                Connect Wallet
-              </button>
-            )}
+      <section className="border-b border-outline-variant/10 bg-surface-container-lowest px-8 pb-8 pt-32">
+        <div className="mx-auto flex max-w-7xl flex-col justify-between gap-6 md:flex-row md:items-end">
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-primary">Payer Dashboard</p>
+            <h1 className="mb-3 text-4xl font-headline md:text-5xl">Invoice Inbox</h1>
+            <p className="max-w-2xl text-on-surface-variant">
+              Track invoices addressed to your wallet, settle funded invoices, follow disputes, and appeal defaults.
+            </p>
           </div>
+          {isConnected ? (
+            <button
+              onClick={loadInvoices}
+              disabled={loading}
+              className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/30 px-4 py-2.5 text-sm font-bold text-on-surface-variant hover:text-primary disabled:opacity-50"
+            >
+              <span className={`material-symbols-outlined text-[18px] ${loading ? "animate-spin" : ""}`}>refresh</span>
+              Refresh
+            </button>
+          ) : (
+            <button onClick={connect} className="rounded-xl bg-primary px-5 py-3 text-sm font-bold text-white">
+              Connect Wallet
+            </button>
+          )}
         </div>
       </section>
 
-      {/* ── Stats strip ──────────────────────────────────────────────────── */}
-      {isConnected && !loading && myInvoices.length > 0 && (
-        <section className="bg-surface-container py-5 px-8 border-b border-outline-variant/10">
-          <div className="max-w-7xl mx-auto flex flex-wrap gap-10">
+      {isConnected && (
+        <section className="border-b border-outline-variant/10 bg-surface-container px-8 py-5">
+          <div className="mx-auto flex max-w-7xl flex-wrap gap-8">
             <div>
-              <p className="text-2xl font-bold text-on-surface">{myInvoices.length}</p>
-              <p className="text-xs text-on-surface-variant">Pending invoices</p>
+              <p className="text-2xl font-bold">{invoices.length}</p>
+              <p className="text-xs text-on-surface-variant">Invoices addressed to you</p>
             </div>
             <div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-3">
                 {Array.from(totalsByToken.entries()).map(([tokenId, amount]) => {
                   const token = tokenMap.get(tokenId) ?? defaultToken;
                   if (!token) return null;
-
                   return (
-                    <span key={tokenId} className="text-sm font-bold text-on-surface">
+                    <span key={tokenId} className="font-bold">
                       <TokenAmount amount={formatTokenAmount(amount, token)} token={token} />
                     </span>
                   );
                 })}
               </div>
-              <p className="text-xs text-on-surface-variant">Total outstanding by token</p>
+              <p className="text-xs text-on-surface-variant">Outstanding total by token</p>
             </div>
-            {overdueCount > 0 && (
-              <div>
-                <p className="text-2xl font-bold text-red-500">{overdueCount}</p>
-                <p className="text-xs text-on-surface-variant">Overdue</p>
-              </div>
-            )}
           </div>
         </section>
       )}
 
-      {/* ── Overdue banner ────────────────────────────────────────────────── */}
-      {isConnected && !loading && overdueCount > 0 && (
-        <div className="px-8 pt-6 max-w-7xl mx-auto">
-          <div className="rounded-xl border border-red-500/30 bg-red-500/5 px-5 py-4 flex items-center gap-3">
-            <span
-              className="material-symbols-outlined text-red-500 text-[22px] shrink-0"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              error
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-red-500">
-                {overdueCount} overdue invoice{overdueCount > 1 ? "s" : ""}
-              </p>
-              <p className="text-xs text-on-surface-variant">
-                These invoices have passed their due date. Settle them to avoid further
-                complications.
-              </p>
-            </div>
+      <section className="px-8 py-8">
+        <div className="mx-auto max-w-7xl overflow-hidden rounded-2xl border border-outline-variant/10 bg-surface-container-lowest">
+          <div className="flex flex-wrap gap-2 border-b border-outline-variant/10 p-4">
+            {TABS.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`rounded-xl px-4 py-2 text-sm font-bold ${
+                  activeTab === tab ? "bg-primary text-white" : "bg-surface-container text-on-surface-variant"
+                }`}
+              >
+                {tab} ({invoices.filter((invoice) => invoiceTab(invoice) === tab).length})
+              </button>
+            ))}
           </div>
-        </div>
-      )}
 
-      {/* ── Main table ───────────────────────────────────────────────────── */}
-      <section className="py-8 px-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="bg-surface-container-lowest rounded-2xl shadow-sm border border-outline-variant/10 overflow-hidden">
-            <div className="p-6 pb-0">
-              <InvoiceFilterBar
-                filters={filters}
-                onFiltersChange={setFilters}
-                onClearFilters={clearFilters}
-                activeFilterCount={activeFilterCount}
-              />
-            </div>
-
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-surface-container-low">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-surface-container-low">
+                <tr>
+                  {["Invoice ID", "Freelancer", "Amount", "Token", "Due Date", "State", "Action"].map((header) => (
+                    <th key={header} className="px-6 py-4 text-xs font-bold uppercase text-on-surface-variant">
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/10">
+                {!isConnected || (!loading && visibleInvoices.length === 0) ? (
                   <tr>
-                    <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider">
-                      <div className="flex items-center gap-1">
-                        ID
-                        <div className="group/tooltip relative inline-block ml-1">
-                          <span className="material-symbols-outlined text-[14px] text-on-surface-variant/40 cursor-help">keyboard</span>
-                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/tooltip:block bg-surface-container-highest text-on-surface text-[10px] p-2 rounded shadow-xl w-max z-20 normal-case font-normal border border-outline-variant/20">
-                            <div className="font-bold mb-1 border-b border-outline-variant/20 pb-1">Shortcuts</div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <kbd className="bg-surface-dim px-1.5 py-0.5 rounded border border-outline-variant/30 min-w-[20px] text-center">↑↓</kbd>
-                              <span>Navigate rows</span>
-                            </div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <kbd className="bg-surface-dim px-1.5 py-0.5 rounded border border-outline-variant/30 min-w-[20px] text-center">↵</kbd>
-                              <span>Open detail</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <kbd className="bg-surface-dim px-1.5 py-0.5 rounded border border-outline-variant/30 min-w-[20px] text-center">S</kbd>
-                              <span>Settle invoice</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </th>
-                    <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider">
-                      Freelancer
-                    </th>
-                    <SortTh
-                      label="Amount Owed"
-                      sortKey="amount"
-                      activeSortKey={sortKey}
-                      sortOrder={sortOrder}
-                      onSort={toggleSort}
-                    />
-                    <SortTh
-                      label="Due Date"
-                      sortKey="due_date"
-                      activeSortKey={sortKey}
-                      sortOrder={sortOrder}
-                      onSort={toggleSort}
-                    />
-                    <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-4 text-[11px] font-bold uppercase text-on-surface-variant tracking-wider">
-                      Action
-                    </th>
+                    <td colSpan={7}>
+                      <EmptyState connected={isConnected} tab={activeTab} />
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-outline-variant/10">
-                  {!isConnected ? (
-                    <tr>
-                      <td colSpan={6}>
-                        <EmptyState connected={false} />
-                      </td>
-                    </tr>
-                  ) : loading ? (
-                    <>
-                      <SkeletonRow />
-                      <SkeletonRow />
-                      <SkeletonRow />
-                    </>
-                  ) : sortedInvoices.length === 0 ? (
-                    <tr>
-                      <td colSpan={6}>
-                        <EmptyState connected={true} />
-                      </td>
-                    </tr>
-                  ) : (
-                    sortedInvoices.map((invoice, index) => {
-                      const overdue = isOverdue(invoice.due_date);
-                      const paid =
-                        invoice.status === "Paid" ||
-                        justPaid.has(invoice.id.toString());
-
-                      return (
-                        <tr
-                          key={invoice.id.toString()}
-                          tabIndex={0}
-                          role="row"
-                          onKeyDown={(e) => handleKeyDown(e, invoice, index)}
-                          className={`transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset focus:bg-primary/5 ${
-                            overdue && !paid
-                              ? "bg-red-500/[0.03] hover:bg-red-500/[0.06]"
-                              : "hover:bg-surface-container/50"
-                          }`}
-                        >
-                          {/* ID */}
-                          <td className="px-6 py-5">
-                            <span className={`font-bold text-sm ${overdue && !paid ? "text-red-500" : "text-primary"}`}>
-                              #{invoice.id.toString()}
-                            </span>
-                          </td>
-
-                          {/* Freelancer */}
-                          <td className="px-6 py-5">
-                            <span className="text-sm font-mono text-on-surface-variant">
-                              {formatAddress(invoice.freelancer)}
-                            </span>
-                          </td>
-
-                          {/* Amount */}
-                          <td className="px-6 py-5">
-                            <span className={`font-bold text-sm ${overdue && !paid ? "text-red-500" : "text-on-surface"}`}>
-                              <InvoiceAmount invoice={invoice} amount={invoice.amount} tokenMap={tokenMap} defaultToken={defaultToken} />
-                            </span>
-                          </td>
-
-                          {/* Due date + countdown */}
-                          <td className="px-6 py-5">
-                            <div className="flex flex-col gap-1.5">
-                              <span className="text-sm text-on-surface">
-                                {formatDate(invoice.due_date)}
-                              </span>
-                              {!paid && (
-                                <DueDateCountdown
-                                  dueDate={invoice.due_date}
-                                  showClaimButton={true}
-                                  onClaimDefault={() => {
-                                    // TODO: Implement claim default logic
-                                    console.log("Claim default for invoice", invoice.id);
-                                  }}
-                                />
+                ) : loading ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-10 text-center text-on-surface-variant">
+                      Loading invoices...
+                    </td>
+                  </tr>
+                ) : (
+                  visibleInvoices.map((invoice) => {
+                    const token = tokenMap.get(invoice.token ?? defaultToken?.contractId ?? "") ?? defaultToken;
+                    const disputed = activeTab === "Disputed";
+                    const meta = disputed ? disputeMeta(invoice) : null;
+                    return (
+                      <tr key={invoice.id.toString()} className={isOverdue(invoice) ? "bg-red-500/[0.03]" : ""}>
+                        <td className="px-6 py-5 font-bold text-primary">#{invoice.id.toString()}</td>
+                        <td className="px-6 py-5">
+                          <div className="font-mono text-sm">{formatAddress(invoice.freelancer)}</div>
+                          <div className="text-xs text-emerald-600">Reputation: 96%</div>
+                        </td>
+                        <td className="px-6 py-5 font-bold">
+                          {token ? formatTokenAmount(invoice.amount, token) : invoice.amount.toString()}
+                        </td>
+                        <td className="px-6 py-5">{token ? <TokenIcon token={token} /> : "TOKEN"}</td>
+                        <td className="px-6 py-5">
+                          <div>{formatDate(invoice.due_date)}</div>
+                          {isOverdue(invoice) && <div className="text-xs font-semibold text-red-600">Overdue</div>}
+                          {meta && <div className="text-xs text-amber-600">{meta.timeout}</div>}
+                        </td>
+                        <td className="px-6 py-5">
+                          <StatusPill invoice={invoice} />
+                          {meta && (
+                            <div className="mt-2 space-y-1 text-xs text-on-surface-variant">
+                              <div>{meta.disputeDate}</div>
+                              <div>{meta.ruling}</div>
+                              <button
+                                onClick={() => navigator.clipboard?.writeText(meta.evidenceHash)}
+                                className="font-mono text-primary"
+                              >
+                                Copy evidence {formatAddress(meta.evidenceHash)}
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-6 py-5 text-right">
+                          {activeTab === "Outstanding" && (
+                            <button
+                              onClick={() => handleSettle(invoice)}
+                              disabled={settlingId === invoice.id.toString()}
+                              className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
+                            >
+                              {settlingId === invoice.id.toString() ? "Settling..." : "Settle"}
+                            </button>
+                          )}
+                          {meta && (
+                            <div className="flex flex-col items-end gap-2">
+                              <Link href={meta.voteLink} className="text-xs font-bold text-primary">
+                                Governance vote
+                              </Link>
+                              {(invoice.status === "Expired" || invoice.status === "Defaulted") && (
+                                <button
+                                  onClick={() =>
+                                    setAppealState({
+                                      invoice,
+                                      evidence: "",
+                                      evidenceHash: "",
+                                      submitting: false,
+                                    })
+                                  }
+                                  className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white"
+                                >
+                                  Appeal Default
+                                </button>
                               )}
                             </div>
-                          </td>
-
-                          {/* Status */}
-                          <td className="px-6 py-5">
-                            {paid ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-xs font-semibold">
-                                <span
-                                  className="material-symbols-outlined text-[12px]"
-                                  style={{ fontVariationSettings: "'FILL' 1" }}
-                                >
-                                  check_circle
-                                </span>
-                                Paid
-                              </span>
-                            ) : overdue ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 text-red-500 border border-red-500/30 text-xs font-semibold">
-                                <span
-                                  className="material-symbols-outlined text-[12px]"
-                                  style={{ fontVariationSettings: "'FILL' 1" }}
-                                >
-                                  error
-                                </span>
-                                Overdue
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/15 text-primary border border-primary/30 text-xs font-semibold">
-                                <span
-                                  className="material-symbols-outlined text-[12px]"
-                                  style={{ fontVariationSettings: "'FILL' 1" }}
-                                >
-                                  pending
-                                </span>
-                                Funded
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Action */}
-                          <td className="px-6 py-5 text-right">
-                            {paid ? (
-                              <span className="text-xs text-on-surface-variant flex items-center justify-end gap-1">
-                                <span className="material-symbols-outlined text-[14px] text-emerald-500">
-                                  task_alt
-                                </span>
-                                Settled
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => setSelectedInvoice(invoice)}
-                                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all active:scale-95 shadow-sm ${
-                                  overdue
-                                    ? "bg-red-500 text-white hover:bg-red-600"
-                                    : "bg-primary text-white hover:bg-primary/90"
-                                }`}
-                              >
-                                <span className="material-symbols-outlined text-[14px]">payments</span>
-                                Settle
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
 
       <Footer />
-
-      {/* ── Settle modal ─────────────────────────────────────────────────── */}
-      {selectedInvoice && (
-        <SettleConfirmModal
-          invoice={selectedInvoice}
-          token={tokenMap.get(selectedInvoice.token ?? defaultToken?.contractId ?? "") ?? defaultToken}
-          isSettling={isSettling}
-          onConfirm={confirmSettle}
-          onCancel={() => !isSettling && setSelectedInvoice(null)}
+      {appealState && (
+        <AppealDefaultModal
+          state={appealState}
+          onEvidenceChange={(evidence) => void updateAppealEvidence(evidence)}
+          onSubmit={() => void submitAppeal()}
+          onClose={() => !appealState.submitting && setAppealState(null)}
         />
       )}
     </main>
   );
-}
-
-function InvoiceAmount({
-  invoice,
-  amount,
-  tokenMap,
-  defaultToken,
-}: {
-  invoice: Invoice;
-  amount: bigint;
-  tokenMap: Map<string, ReturnType<typeof useApprovedTokens>["tokens"][number]>;
-  defaultToken: ReturnType<typeof useApprovedTokens>["defaultToken"];
-}) {
-  const token = tokenMap.get(invoice.token ?? defaultToken?.contractId ?? "") ?? defaultToken;
-
-  if (!token) {
-    return <>{amount.toString()}</>;
-  }
-
-  return <TokenAmount amount={formatTokenAmount(amount, token)} token={token} />;
 }

@@ -6,8 +6,10 @@ import { useCallback, useEffect, useState } from "react";
 import Footer from "@/components/Footer";
 import Navbar from "@/components/Navbar";
 import VoteProgressBar from "@/components/VoteProgressBar";
+import { GOVERNANCE_ADMIN_ADDRESS } from "@/constants";
 import { useToast } from "@/context/ToastContext";
 import { useWallet } from "@/context/WalletContext";
+import { hashEvidence } from "@/utils/evidence";
 import {
     Proposal,
     ProposalStatus,
@@ -20,6 +22,7 @@ import {
     quorumReached,
     timeRemaining,
     totalVotes,
+    vetoProposal,
 } from "@/utils/governance";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -31,6 +34,7 @@ function StatusBadge({ status }: { status: ProposalStatus }) {
     Failed: { color: "bg-red-500/15 text-red-500 border-red-500/30", icon: "cancel" },
     Executed: { color: "bg-purple-500/15 text-purple-500 border-purple-500/30", icon: "rocket_launch" },
     Pending: { color: "bg-amber-500/15 text-amber-500 border-amber-500/30", icon: "schedule" },
+    Vetoed: { color: "bg-red-500/15 text-red-500 border-red-500/30", icon: "gavel" },
   };
   const { color, icon } = config[status];
   return (
@@ -143,6 +147,67 @@ function ParameterChangeTable({ changes }: { changes: NonNullable<Proposal["para
   );
 }
 
+function VetoProposalModal({
+  reason,
+  reasonHash,
+  submitting,
+  onReasonChange,
+  onSubmit,
+  onClose,
+}: {
+  reason: string;
+  reasonHash: string;
+  submitting: boolean;
+  onReasonChange: (reason: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+        <div className="border-b border-outline-variant/10 p-6">
+          <h2 className="text-xl font-bold">Veto Proposal</h2>
+          <p className="mt-1 text-sm text-on-surface-variant">
+            This action is logged permanently on-chain.
+          </p>
+        </div>
+        <div className="space-y-4 p-6">
+          <label className="block text-sm font-semibold">
+            Reason
+            <textarea
+              value={reason}
+              onChange={(event) => onReasonChange(event.target.value)}
+              className="mt-2 min-h-28 w-full rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-3 text-sm outline-none focus:border-primary"
+              placeholder="Explain why this proposal must be vetoed"
+            />
+          </label>
+          {reasonHash && (
+            <p className="break-all rounded-lg bg-surface-container p-3 font-mono text-xs text-on-surface-variant">
+              reason_hash: {reasonHash}
+            </p>
+          )}
+        </div>
+        <div className="flex gap-3 p-6 pt-0">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="flex-1 rounded-xl border border-outline-variant/30 px-4 py-3 text-sm font-bold text-on-surface-variant disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={!reasonHash || submitting}
+            className="flex-[2] rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
+          >
+            {submitting ? "Submitting..." : "Confirm Veto"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ProposalDetailPage() {
@@ -159,6 +224,10 @@ export default function ProposalDetailPage() {
   const [selectedVote, setSelectedVote] = useState<VoteChoice | null>(null);
   const [isVoting, setIsVoting] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [vetoModalOpen, setVetoModalOpen] = useState(false);
+  const [vetoReason, setVetoReason] = useState("");
+  const [vetoReasonHash, setVetoReasonHash] = useState("");
+  const [isVetoing, setIsVetoing] = useState(false);
 
   const { signTx } = useWallet();
 
@@ -233,13 +302,57 @@ export default function ProposalDetailPage() {
     }
   };
 
+  const handleVetoReasonChange = async (reason: string) => {
+    setVetoReason(reason);
+    setVetoReasonHash(await hashEvidence(reason));
+  };
+
+  const handleVeto = async () => {
+    if (!proposal || !address || !vetoReasonHash) return;
+
+    setIsVetoing(true);
+    const toastId = addToast({ type: "pending", title: "Vetoing proposal..." });
+    try {
+      const txHash = await vetoProposal(proposal.id, vetoReasonHash, address, signTx);
+      updateToast(toastId, {
+        type: "success",
+        title: "Proposal vetoed",
+        txHash,
+      });
+      setProposal({
+        ...proposal,
+        status: "Vetoed",
+        vetoHistory: [
+          {
+            proposalId: proposal.id,
+            admin: address,
+            reasonHash: vetoReasonHash,
+            createdAt: Math.floor(Date.now() / 1000),
+          },
+          ...(proposal.vetoHistory ?? []),
+        ],
+      });
+      setVetoModalOpen(false);
+      setVetoReason("");
+      setVetoReasonHash("");
+    } catch (err) {
+      updateToast(toastId, {
+        type: "error",
+        title: "Veto failed",
+        message: err instanceof Error ? err.message : "Transaction rejected",
+      });
+    } finally {
+      setIsVetoing(false);
+    }
+  };
+
   // ─── Derived state ──────────────────────────────────────────────────────────
 
   const alreadyVoted = !!proposal?.userVote;
   const isActive = proposal?.status === "Active";
   const isPassed = proposal?.status === "Passed";
   const canVote = isActive && !alreadyVoted && isConnected && votingPower > 0;
-  const canExecute = isPassed && isConnected;
+  const isAdmin = !!address && address === GOVERNANCE_ADMIN_ADDRESS;
   const voteButtonsDisabled = !canVote || isVoting;
 
   const remaining = proposal ? timeRemaining(proposal) : "";
@@ -583,12 +696,59 @@ export default function ProposalDetailPage() {
                   </div>
                 </div>
               )}
+
+              {isAdmin && proposal.status !== "Executed" && proposal.status !== "Vetoed" && (
+                <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-red-500">
+                    <span className="material-symbols-outlined text-[20px]">gavel</span>
+                    <p className="text-sm font-semibold">Admin veto controls</p>
+                  </div>
+                  <p className="text-xs text-on-surface-variant">
+                    Only the configured governance admin address can veto proposals.
+                  </p>
+                  <button
+                    onClick={() => setVetoModalOpen(true)}
+                    className="w-full rounded-xl bg-red-600 py-3 text-sm font-bold text-white transition-all hover:bg-red-700"
+                  >
+                    Veto Proposal
+                  </button>
+                </div>
+              )}
+
+              {proposal.vetoHistory && proposal.vetoHistory.length > 0 && (
+                <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest p-5">
+                  <h2 className="mb-3 text-base font-semibold">Veto History</h2>
+                  <div className="space-y-3">
+                    {proposal.vetoHistory.map((record) => (
+                      <div key={`${record.reasonHash}-${record.createdAt}`} className="rounded-xl bg-surface-container p-3">
+                        <p className="text-xs text-on-surface-variant">
+                          {new Date(record.createdAt * 1000).toLocaleString()} by{" "}
+                          <span className="font-mono">{record.admin}</span>
+                        </p>
+                        <p className="mt-1 break-all font-mono text-xs text-red-500">
+                          {record.reasonHash}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       <Footer />
+      {vetoModalOpen && (
+        <VetoProposalModal
+          reason={vetoReason}
+          reasonHash={vetoReasonHash}
+          submitting={isVetoing}
+          onReasonChange={(reason) => void handleVetoReasonChange(reason)}
+          onSubmit={() => void handleVeto()}
+          onClose={() => !isVetoing && setVetoModalOpen(false)}
+        />
+      )}
     </main>
   );
 }
