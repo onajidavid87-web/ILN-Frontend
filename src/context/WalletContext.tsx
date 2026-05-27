@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { isConnected, getAddress, setAllowed, signTransaction, getNetwork } from "@stellar/freighter-api";
 import { NETWORK_NAME, NETWORK_PASSPHRASE } from "@/constants";
+import { getWalletRoles, type WalletRole } from "@/utils/soroban";
 import { useToast } from "./ToastContext";
 
 interface WalletContextType {
@@ -11,6 +12,8 @@ interface WalletContextType {
   isInstalled: boolean;
   error: string | null;
   networkMismatch: boolean;
+  roles: WalletRole[];
+  rolesLoading: boolean;
   connect: () => Promise<void>;
   disconnect: () => void;
   signTx: (txXdr: string) => Promise<string>;
@@ -63,6 +66,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isInstalled, setIsInstalled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [networkMismatch, setNetworkMismatch] = useState(false);
+  const [roles, setRoles] = useState<WalletRole[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
 
   const checkNetwork = useCallback(async () => {
     try {
@@ -104,6 +109,35 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     checkConnection();
   }, [checkConnection]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function detectRoles(walletAddress: string) {
+      setRolesLoading(true);
+      try {
+        const nextRoles = await getWalletRoles(walletAddress);
+        if (!cancelled) setRoles(nextRoles);
+      } catch (roleError) {
+        console.error("Failed to detect wallet roles", roleError);
+        if (!cancelled) setRoles([]);
+      } finally {
+        if (!cancelled) setRolesLoading(false);
+      }
+    }
+
+    if (!address || networkMismatch) {
+      setRoles([]);
+      setRolesLoading(false);
+      return;
+    }
+
+    void detectRoles(address);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address, networkMismatch]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -166,6 +200,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setAddress(null);
     setNetworkMismatch(false);
     setError(null);
+    setRoles([]);
+    setRolesLoading(false);
     localStorage.removeItem(STORAGE_KEY);
     addToast({ type: "success", title: "Disconnected" });
   };
@@ -204,6 +240,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         isInstalled,
         error,
         networkMismatch,
+        roles,
+        rolesLoading,
         connect, 
         disconnect, 
         signTx 

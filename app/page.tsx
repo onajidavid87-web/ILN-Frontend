@@ -2,6 +2,7 @@
 
 import Navbar from "@/components/Navbar";
 import Hero from "@/components/Hero";
+import PersonalizedDashboard from "@/components/PersonalizedDashboard";
 import Stats from "@/components/Stats";
 import HowItWorks from "@/components/HowItWorks";
 import ForFreelancers from "@/components/ForFreelancers";
@@ -19,6 +20,7 @@ export default function Home() {
     <main className="min-h-screen">
       <Navbar />
       <Hero />
+      <PersonalizedDashboard />
       <Stats />
       <HowItWorks />
       <ForFreelancers />

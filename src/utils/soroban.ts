@@ -73,6 +73,8 @@ export interface ReputationEvent {
   score?: number;
 }
 
+export type WalletRole = "freelancer" | "payer" | "lp";
+
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
 const KNOWN_TOKEN_METADATA: Record<string, Omit<TokenMetadata, "contractId">> = {
@@ -196,6 +198,37 @@ export async function getAllInvoices(): Promise<Invoice[]> {
     if (i > BigInt(1000)) break;
   }
   return invoices;
+}
+
+export async function getWalletRoles(address: string): Promise<WalletRole[]> {
+  const normalized = address.toLowerCase();
+  const invoices = await getAllInvoices();
+  const roles = new Set<WalletRole>();
+
+  for (const invoice of invoices) {
+    if (invoice.freelancer?.toLowerCase() === normalized) roles.add("freelancer");
+    if (invoice.payer?.toLowerCase() === normalized) roles.add("payer");
+    if (invoice.funder?.toLowerCase() === normalized) roles.add("lp");
+  }
+
+  return Array.from(roles);
+}
+
+export async function getNativeXlmBalance(address: string): Promise<number> {
+  const horizonUrl =
+    NETWORK_PASSPHRASE === "Public Global Stellar Network ; September 2015"
+      ? `https://horizon.stellar.org/accounts/${address}`
+      : `https://horizon-testnet.stellar.org/accounts/${address}`;
+
+  const response = await fetch(horizonUrl);
+  if (!response.ok) {
+    if (response.status === 404) return 0;
+    throw new Error("Failed to fetch XLM balance.");
+  }
+
+  const account = await response.json();
+  const nativeBalance = account.balances?.find((balance: { asset_type?: string }) => balance.asset_type === "native");
+  return Number(nativeBalance?.balance ?? 0);
 }
 
 export async function getApprovedTokenIds(): Promise<string[]> {

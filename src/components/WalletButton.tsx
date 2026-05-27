@@ -7,6 +7,7 @@ import { TokenAmount } from "./TokenSelector";
 import { formatAddress, formatTokenAmount } from "@/utils/format";
 import { NETWORK_NAME } from "@/constants";
 import { getTokenBalance } from "@/utils/soroban";
+import TestnetFaucetButton from "./TestnetFaucetButton";
 
 interface WalletBalance {
   contractId: string;
@@ -93,6 +94,7 @@ export default function WalletButton() {
             </div>
           ) : null}
           <span className="text-xs font-mono text-on-surface-variant">{formatAddress(address!)}</span>
+          <TestnetFaucetButton />
         </div>
         <button
           onClick={disconnect}
