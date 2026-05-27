@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useReducer, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
+import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { NETWORK_NAME } from "@/constants";
 import TokenSelector, { TokenAmount } from "../components/TokenSelector";
 import FieldTooltip from "./FieldTooltip";
@@ -74,7 +75,17 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
   const effectiveTokenId = form.tokenId || defaultToken?.contractId || "";
   const selectedToken = tokenMap.get(effectiveTokenId) ?? defaultToken ?? null;
   const preview = getYieldPreview(form.amount, form.discountRate, selectedToken?.decimals ?? 7);
-  
+
+  // Live USD-equivalent preview for the entered amount (#22). Price is fetched
+  // per token (cached 60s) and the USD figure recomputes as the user types.
+  const { usdPrice } = useTokenPrice(selectedToken?.symbol);
+  const parsedAmount = Number.parseFloat(form.amount);
+  const usdEquivalent =
+    usdPrice !== null && Number.isFinite(parsedAmount) && parsedAmount > 0
+      ? parsedAmount * usdPrice
+      : null;
+
+
   const { searchAddresses } = useAddressBook();
   const [addressBookOpen, setAddressBookOpen] = useState(false);
   const [addressBookQuery, setAddressBookQuery] = useState("");
@@ -365,6 +376,12 @@ export default function SubmitInvoiceForm({ initialValues, prefillId }: SubmitIn
                 <div className="grid gap-5 md:grid-cols-2">
                   <Field label={`${t("submitForm.amountLabel")}${selectedToken ? ` (${selectedToken.symbol})` : ""}`} tooltip="The full value of the invoice. This is what the payer owes you in total." error={errors.amount}>
                     <input value={form.amount} onChange={(event) => setField("amount", event.target.value)} className="w-full rounded-2xl bg-surface-container-low px-4 py-3.5 text-sm border border-outline-variant/15 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none" placeholder="5000.00" inputMode="decimal" />
+                    {usdEquivalent !== null ? (
+                      <p className="mt-2 text-xs font-medium text-on-surface-variant" data-testid="usd-preview">
+                        ~ ${usdEquivalent.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                        <span className="ml-1 text-on-surface-variant/60">· Price is approximate</span>
+                      </p>
+                    ) : null}
                   </Field>
                   <Field label="Due date" error={errors.dueDate}>
                     <input aria-label="Due date" value={form.dueDate} onChange={(event) => setField("dueDate", event.target.value)} min={getMinimumDueDate()} className="w-full rounded-2xl bg-surface-container-low px-4 py-3.5 text-sm border border-outline-variant/15 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none" type="date" />
