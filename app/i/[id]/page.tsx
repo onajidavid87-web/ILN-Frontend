@@ -6,8 +6,11 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ActivityFeed from "@/components/ActivityFeed";
 import CancelInvoiceButton from "@/components/CancelInvoiceButton";
+import InvoicePdfButton from "@/components/InvoicePdfButton";
+import ShareInvoiceButton from "@/components/ShareInvoiceButton";
 import InvoiceStatusBadge from "@/components/InvoiceStatusBadge";
 import { useWallet } from "@/context/WalletContext";
+import { useApprovedTokens } from "@/hooks/useApprovedTokens";
 import { formatAddress, formatDate, formatUSDC } from "@/utils/format";
 import { getInvoice, type Invoice } from "@/utils/soroban";
 
@@ -16,6 +19,7 @@ type LoadState = "loading" | "success" | "error";
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { address, connect } = useWallet();
+  const { tokenMap, defaultToken } = useApprovedTokens();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +63,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
+  const tokenSymbol =
+    tokenMap.get(invoice.token ?? defaultToken?.contractId ?? "")?.symbol ?? "USDC";
+
   return (
     <main className="min-h-screen">
       <Navbar />
@@ -69,21 +76,36 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <p className="text-xs font-bold uppercase tracking-widest text-primary">Invoice Detail</p>
               <h1 className="mt-2 text-3xl font-headline">Invoice #{invoice.id.toString()}</h1>
             </div>
-            {!address ? (
-              <button
-                type="button"
-                onClick={connect}
-                className="rounded-xl bg-primary px-5 py-3 text-sm font-bold text-on-primary"
-              >
-                Connect Wallet
-              </button>
-            ) : (
-              <CancelInvoiceButton
+            <div className="flex flex-wrap items-center gap-3">
+              {/* PDF export is available for every invoice state (#21). */}
+              <InvoicePdfButton
                 invoice={invoice}
-                walletAddress={address}
-                onCancelled={(cancelled) => setInvoice(cancelled)}
+                data={{
+                  tokenSymbol,
+                  amountFormatted: formatUSDC(invoice.amount),
+                  dueDateFormatted: formatDate(invoice.due_date),
+                }}
               />
-            )}
+              {/* Sharing is offered to the submitter (#23). */}
+              {address && invoice.freelancer.toLowerCase() === address.toLowerCase() ? (
+                <ShareInvoiceButton invoice={invoice} />
+              ) : null}
+              {!address ? (
+                <button
+                  type="button"
+                  onClick={connect}
+                  className="rounded-xl bg-primary px-5 py-3 text-sm font-bold text-on-primary"
+                >
+                  Connect Wallet
+                </button>
+              ) : (
+                <CancelInvoiceButton
+                  invoice={invoice}
+                  walletAddress={address}
+                  onCancelled={(cancelled) => setInvoice(cancelled)}
+                />
+              )}
+            </div>
           </div>
 
           <article className="rounded-2xl border border-outline-variant/15 bg-surface-container-lowest p-6 shadow-xl">
