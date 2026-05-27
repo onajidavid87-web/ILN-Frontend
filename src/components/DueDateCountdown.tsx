@@ -40,8 +40,8 @@ function formatTimeDisplay(time: TimeRemaining): {
 } {
   if (time.isOverdue) {
     return {
-      text: `Overdue by ${time.days}d ${time.hours}h`,
-      className: "text-red-500 font-semibold",
+      text: "Expired",
+      className: "inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-bold text-gray-600",
       shouldPulse: false,
     };
   }
@@ -67,10 +67,10 @@ function formatTimeDisplay(time: TimeRemaining): {
     };
   }
 
-  // More than 7 days: "X days Y hrs" with default color
+  // More than 7 days: "X days Y hrs" with green color
   return {
     text: `${days}d ${time.hours}h`,
-    className: "text-on-surface font-medium",
+    className: "text-green-500 font-semibold",
     shouldPulse: false,
   };
 }

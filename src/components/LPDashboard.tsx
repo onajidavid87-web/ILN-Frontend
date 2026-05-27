@@ -31,6 +31,7 @@ import YieldCalculator from "./YieldCalculator";
 import LastUpdated from "./LastUpdated";
 import InvoiceStatusBadge from "./InvoiceStatusBadge";
 import FundConfirmModal from "./FundConfirmModal";
+import DisputeInvoiceModal from "./DisputeInvoiceModal";
 import type { DataTableColumn } from "./DataTable";
 
 
@@ -57,6 +58,7 @@ export default function LPDashboard() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [claimingInvoiceId, setClaimingInvoiceId] = useState<string | null>(null);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
+  const [disputeInvoice, setDisputeInvoice] = useState<Invoice | null>(null);
 
   const {
     filters,
@@ -635,6 +637,15 @@ export default function LPDashboard() {
                             Fund
                           </button>
                         ) : (
+                          <>
+                            {invoice.status === "Funded" && address && invoice.payer === address && (
+                              <button
+                                onClick={() => setDisputeInvoice(invoice)}
+                                className="text-xs px-3 py-1.5 rounded-lg font-bold border border-red-300 text-red-600 hover:bg-red-50 transition-colors"
+                              >
+                                Raise Dispute
+                              </button>
+                            )}
                           <div className="flex flex-col items-end gap-1">
                             <InvoiceStatusBadge status={invoice.status} />
                             {invoice.status !== "Pending" && (
@@ -644,6 +655,7 @@ export default function LPDashboard() {
                               </span>
                             )}
                           </div>
+                          </>
                         )}
                       </div>
                     </td>
@@ -667,6 +679,17 @@ export default function LPDashboard() {
           setSelectedInvoice(null);
         }}
       />
+
+      {/* Dispute Modal */}
+      {disputeInvoice && (
+        <DisputeInvoiceModal
+          invoice={disputeInvoice}
+          onClose={() => setDisputeInvoice(null)}
+          onSuccess={() => {
+            setDisputeInvoice(null);
+          }}
+        />
+      )}
     </div>
   );
 }
