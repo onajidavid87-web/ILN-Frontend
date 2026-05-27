@@ -7,6 +7,14 @@ import { RiskLevel, PayerScore } from "@/utils/risk";
 import DueDateCountdown from "./DueDateCountdown";
 import RiskBadge from "./RiskBadge";
 import OracleBadge from "./OracleBadge";
+import AuctionRateTicker from "./AuctionRateTicker";
+
+interface AuctionMeta {
+  startRate: number;
+  minRate: number;
+  auctionStartTime: number;
+  auctionDurationSeconds: number;
+}
 
 interface InvoiceMarketplaceCardProps {
   invoice: Invoice;
@@ -17,6 +25,7 @@ interface InvoiceMarketplaceCardProps {
   onFund: (invoice: Invoice) => void;
   isWalletConnected: boolean;
   payerOracleVerified?: boolean;
+  auctionMeta?: AuctionMeta;
 }
 
 function yieldPercent(amount: bigint, discountRate: number): string {
@@ -34,6 +43,7 @@ export default function InvoiceMarketplaceCard({
   onFund,
   isWalletConnected,
   payerOracleVerified = false,
+  auctionMeta,
 }: InvoiceMarketplaceCardProps) {
   const token = tokenMap.get(invoice.token ?? "") ?? defaultToken;
   const tokenSymbol = token?.symbol ?? "USDC";
@@ -79,6 +89,12 @@ export default function InvoiceMarketplaceCard({
         )}
         <OracleBadge verified={payerOracleVerified} />
       </div>
+
+      {auctionMeta && (
+        <div className="mb-4">
+          <AuctionRateTicker {...auctionMeta} />
+        </div>
+      )}
 
       {isWalletConnected ? (
         <button
