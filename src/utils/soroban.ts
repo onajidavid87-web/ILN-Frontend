@@ -70,6 +70,7 @@ export interface ReputationScore {
   invoices_submitted: number;
   invoices_paid: number;
   invoices_defaulted: number;
+  last_activity_ledger?: number;
 }
 
 export interface ReputationEvent {
@@ -308,6 +309,52 @@ export async function getTokenAllowance({
   return BigInt(scValToNative(callResult.result.retval));
 }
 
+export async function approveToken({
+  from,
+  spender = CONTRACT_ID,
+  amount,
+  tokenId = TESTNET_USDC_TOKEN_ID,
+}: {
+  from: string;
+  spender?: string;
+  amount: bigint;
+  tokenId?: string;
+}) {
+  const account = await server.getAccount(from);
+  const params = [
+    Address.fromString(from).toScVal(),
+    Address.fromString(spender).toScVal(),
+    nativeToScVal(amount, { type: "i128" }),
+    nativeToScVal(1_000_000, { type: "u32" }), // Expiration ledger (high enough)
+  ];
+
+  const tx = new TransactionBuilder(account, {
+    fee: "10000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeHostFunction({
+        func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+          new xdr.InvokeContractArgs({
+            contractAddress: Address.fromString(tokenId).toScAddress(),
+            functionName: "approve",
+            args: params,
+          })
+        ),
+        auth: [],
+      })
+    )
+    .setTimeout(60 * 5)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (!rpc.Api.isSimulationSuccess(sim)) {
+    throw new Error(`Approval simulation failed: ${sim.error}`);
+  }
+  return rpc.assembleTransaction(tx, sim).build();
+}
+
+
 export async function getUsdcAllowance(args: {
   owner: string;
   spender?: string;
@@ -356,6 +403,7 @@ export async function getReputation(address: string): Promise<ReputationScore | 
       invoices_submitted: Number(native.invoices_submitted ?? native.submitted ?? 0),
       invoices_paid: Number(native.invoices_paid ?? native.paid ?? native.settled_on_time ?? 0),
       invoices_defaulted: Number(native.invoices_defaulted ?? native.defaulted ?? native.defaults ?? 0),
+      last_activity_ledger: native.last_activity_ledger !== undefined ? Number(native.last_activity_ledger) : undefined,
     };
   } catch {
     return null;
@@ -472,8 +520,11 @@ export async function fundInvoice(funder: string, invoice_id: bigint) {
 
 // ─── Write: mark paid ─────────────────────────────────────────────────────────
 
-export async function markPaid(payer: string, invoice_id: bigint) {
-  const params: xdr.ScVal[] = [nativeToScVal(invoice_id, { type: "u64" })];
+export async function markPaid(payer: string, invoice_id: bigint, amount: bigint) {
+  const params: xdr.ScVal[] = [
+    nativeToScVal(invoice_id, { type: "u64" }),
+    nativeToScVal(amount, { type: "i128" }),
+  ];
   const account = await server.getAccount(payer);
   const tx = new TransactionBuilder(account, {
     fee: "10000",

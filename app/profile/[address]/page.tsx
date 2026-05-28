@@ -66,6 +66,7 @@ import ProfileActivityChart from "@/components/ProfileActivityChart";
 import ProfileRecentInvoices from "@/components/ProfileRecentInvoices";
 import { ScoreSimulator } from "@/components/profile/ScoreSimulator";
 import OracleBadge from "@/components/OracleBadge";
+import { DecayWarningBanner } from "@/components/DecayWarningBanner";
 
 interface ScoreHistoryPoint {
   period: string;
@@ -259,6 +260,9 @@ export default function ProfilePage() {
               <p className="text-xs uppercase tracking-[0.24em] text-on-surface-variant">Last active</p>
               <p className="mt-1 text-lg font-semibold text-on-surface">{lastActiveLabel}</p>
             </div>
+          </div>
+          <div className="mt-4">
+            <DecayWarningBanner address={address} />
           </div>
 
           {error && (

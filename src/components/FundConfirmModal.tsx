@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useWallet } from "@/context/WalletContext";
+import { useToast } from "@/context/ToastContext";
 import { useTransaction } from "@/hooks/useTransaction";
 import TokenSelector, { TokenAmount } from "./TokenSelector";
 import { useApprovedTokens } from "@/hooks/useApprovedTokens";
@@ -26,11 +27,27 @@ interface FundConfirmModalProps {
 export default function FundConfirmModal({ invoice, onClose, onSuccess, payerScore }: FundConfirmModalProps) {
   const { address, signTx } = useWallet();
   const { addToast, updateToast } = useToast();
+  const { execute, loading: txLoading, error: txError, signingModal } = useTransaction();
+  const isApproving = txLoading; // or more specific state if needed
+  const isFunding = txLoading; 
   const { tokens, tokenMap, defaultToken } = useApprovedTokens();
   const [isCheckingAllowance, setIsCheckingAllowance] = useState(true);
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [fundingError, setFundingError] = useState<string | null>(null);
   const [faqExpanded, setFaqExpanded] = useState(false);
+  const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (invoice && !selectedTokenId) {
+      setSelectedTokenId(invoice.token || defaultToken?.contractId || null);
+    }
+  }, [invoice, selectedTokenId, defaultToken]);
+
+  const selectedToken = useMemo(() => {
+    return selectedTokenId ? tokenMap.get(selectedTokenId) || null : null;
+  }, [selectedTokenId, tokenMap]);
+
+  const isTokenMismatch = !!(invoice && selectedTokenId && invoice.token && selectedTokenId !== invoice.token);
 
   const selectedInvoiceToken = invoice
     ? tokenMap.get(invoice.token ?? defaultToken?.contractId ?? "") ?? defaultToken ?? null
@@ -74,15 +91,15 @@ export default function FundConfirmModal({ invoice, onClose, onSuccess, payerSco
         const tx = await buildApproveTokenTransaction({
           owner: address,
           amount: invoice.amount,
-          tokenId: selectedInvoiceToken.contractId,
+          tokenId: selectedTokenId || invoice.token || "",
         });
         return submitSignedTransaction({ tx, signTx });
       },
       {
-        title: `Approving ${selectedInvoiceToken.symbol}...`,
+        title: `Approving ${selectedToken?.symbol || "token"}...`,
         pendingMessage: "Waiting for wallet signature...",
-        successTitle: `${selectedInvoiceToken.symbol} approved`,
-        successMessage: `Allowance updated for ${formatTokenAmount(invoice.amount, selectedInvoiceToken)}.`,
+        successTitle: `${selectedToken?.symbol || "Token"} approved`,
+        successMessage: `Allowance updated for ${formatTokenAmount(invoice.amount, selectedToken || selectedInvoiceToken!)}.`,
       }
     );
 
@@ -155,10 +172,31 @@ export default function FundConfirmModal({ invoice, onClose, onSuccess, payerSco
       {/* Main Content Area */}
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="w-full max-w-2xl bg-surface-container-lowest">
-          
+          <div className="mb-6 space-y-4">
+            <TokenSelector
+              label="Funding token"
+              value={selectedTokenId || ""}
+              tokens={tokens}
+              onChange={(val) => setSelectedTokenId(val)}
+              showBalances
+              hint={isTokenMismatch ? "" : "Funding must match the invoice's denomination."}
+              error={isTokenMismatch ? "Currency mismatch" : undefined}
+            />
+          </div>
+
           {fundingError && (
             <div className="mb-6 rounded-xl border border-error/15 bg-error-container/70 px-4 py-3 text-sm text-on-error-container">
               {fundingError}
+            </div>
+          )}
+
+          {isTokenMismatch && (
+            <div className="mb-6 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-4 flex items-center gap-4 text-amber-800">
+              <span className="material-symbols-outlined text-amber-600">warning</span>
+              <p className="text-sm font-medium">
+                This invoice is denominated in <strong>{tokenMap.get(invoice.token || "")?.symbol || "another token"}</strong>. 
+                You must fund with <strong>{tokenMap.get(invoice.token || "")?.symbol || "the required token"}</strong>.
+              </p>
             </div>
           )}
 
@@ -167,11 +205,11 @@ export default function FundConfirmModal({ invoice, onClose, onSuccess, payerSco
             <div className="animate-in slide-in-from-right-8 duration-300">
               <div className="mb-8">
                 <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-sm font-bold tracking-wide">1 of 2</span>
-                <h2 className="text-3xl font-bold mt-4 mb-2">Approve {tokenSymbol}</h2>
+                <h2 className="text-3xl font-bold mt-4 mb-2">Approve {selectedToken?.symbol || tokenSymbol}</h2>
                 <p className="text-lg text-on-surface-variant">
                   {isCheckingAllowance 
                     ? "Checking current allowance..."
-                    : `You're authorising ILN to spend ${selectedInvoiceToken ? formatTokenAmount(invoice.amount, selectedInvoiceToken) : invoice.amount.toString()} ${tokenSymbol} from your wallet. This is a one-time approval for this invoice.`}
+                    : `You're authorising ILN to spend ${selectedToken ? formatTokenAmount(invoice.amount, selectedToken) : invoice.amount.toString()} ${selectedToken?.symbol || tokenSymbol} from your wallet. This is a one-time approval.`}
                 </p>
               </div>
 
@@ -230,16 +268,10 @@ export default function FundConfirmModal({ invoice, onClose, onSuccess, payerSco
               </div>
 
               <div className="bg-surface-container-low rounded-2xl p-6 mb-8 border border-outline-variant/20 space-y-4">
-                {selectedInvoiceToken ? (
-                  <TokenSelector
-                    label="Invoice token"
-                    value={selectedInvoiceToken.contractId}
-                    tokens={tokens}
-                    readOnly
-                    showBalances
-                    hint="The invoice specifies this token, so LP funding must use the same asset."
-                  />
-                ) : null}
+                <div className="flex justify-between text-base">
+                  <span className="text-on-surface-variant">Selected Token:</span>
+                  <span className="font-bold">{selectedToken?.symbol || "Unknown"}</span>
+                </div>
 
                 <div className="flex justify-between text-base">
                   <span className="text-on-surface-variant">You will send:</span>
@@ -301,7 +333,7 @@ export default function FundConfirmModal({ invoice, onClose, onSuccess, payerSco
 
               <div className="flex items-center gap-4">
                 <button
-                  disabled={isFunding}
+                  disabled={isFunding || isTokenMismatch}
                   onClick={confirmFunding}
                   className="px-8 py-4 rounded-xl font-bold text-lg bg-primary text-surface-container-lowest hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3 w-full"
                 >
@@ -311,7 +343,7 @@ export default function FundConfirmModal({ invoice, onClose, onSuccess, payerSco
                       Funding invoice...
                     </>
                   ) : (
-                    "Fund Invoice"
+                    isTokenMismatch ? "Currency Mismatch" : "Fund Invoice"
                   )}
                 </button>
                 <button
