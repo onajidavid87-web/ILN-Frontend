@@ -9,6 +9,14 @@ vi.mock("@/components/ProfileActivityChart", () => ({
   default: ({ data }: { data: unknown[] }) => <div>Score chart with {data.length} points</div>,
 }));
 
+vi.mock("@/components/ActivityHeatmap", () => ({
+  default: () => <div>Activity heatmap</div>,
+}));
+
+vi.mock("@/components/DecayWarningBanner", () => ({
+  DecayWarningBanner: () => null,
+}));
+
 vi.mock("next/navigation", () => ({
   useParams: () => ({ address: "GPAYER1" }),
 }));

@@ -8,6 +8,7 @@ import { NotificationProvider } from "@/context/NotificationContext";
 import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
 import FABProvider from "@/components/FABProvider";
 import CommandPalette from "@/components/CommandPalette";
+import ContractEventSync from "@/components/ContractEventSync";
 import Providers from "./Providers";
 
 
@@ -52,6 +53,7 @@ export default function RootLayout({
         <I18nProvider>
           <Providers>
             <ToastProvider>
+              <ContractEventSync />
               <WalletProvider>
                 <NotificationProvider>
                   <FABProvider />

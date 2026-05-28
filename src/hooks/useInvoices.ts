@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAllInvoices, getInvoice, fundInvoice, submitSignedTransaction, Invoice } from "@/utils/soroban";
 import { useWallet } from "@/context/WalletContext";
 import { useToast } from "@/context/ToastContext";
+import { isContractEventStreamingActive } from "@/lib/contract-event-stream-state";
 
 const TERMINAL_STATUSES = ["Paid", "Defaulted", "Cancelled"];
 
@@ -13,13 +14,14 @@ export function useInvoices() {
     queryFn: getAllInvoices,
     refetchInterval: (query) => {
       const data = query.state.data as Invoice[] | undefined;
-      if (!data) return 15000;
-      
+      if (!data) return isContractEventStreamingActive() ? 60_000 : 15000;
+
       const hasActiveInvoices = data.some(
-        (invoice) => !TERMINAL_STATUSES.includes(invoice.status)
+        (invoice) => !TERMINAL_STATUSES.includes(invoice.status),
       );
-      
-      return hasActiveInvoices ? 15000 : false;
+
+      if (!hasActiveInvoices) return false;
+      return isContractEventStreamingActive() ? 60_000 : 15000;
     },
   });
 }
@@ -31,8 +33,9 @@ export function useInvoice(id: bigint | null) {
     enabled: !!id,
     refetchInterval: (query) => {
       const data = query.state.data as Invoice | undefined;
-      if (!data) return 15000;
-      return TERMINAL_STATUSES.includes(data.status) ? false : 15000;
+      if (!data) return isContractEventStreamingActive() ? 60_000 : 15000;
+      if (TERMINAL_STATUSES.includes(data.status)) return false;
+      return isContractEventStreamingActive() ? 60_000 : 15000;
     },
   });
 }

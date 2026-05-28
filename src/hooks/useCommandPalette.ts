@@ -30,7 +30,6 @@ export function useCommandPalette(onOpenShortcuts?: () => void) {
   const [query, setQuery] = useState("");
   const [recentCommandIds, setRecentCommandIds] = useState<string[]>([]);
   const router = useRouter();
-
   const commands: Command[] = useMemo(() => [
     { id: "dashboard", label: "Go to Dashboard", action: () => router.push("/dashboard"), category: "navigation" },
     { id: "analytics", label: "Go to Analytics", action: () => router.push("/analytics"), category: "navigation" },
@@ -41,8 +40,8 @@ export function useCommandPalette(onOpenShortcuts?: () => void) {
     { id: "submit", label: "Submit new invoice", action: () => router.push("/submit"), category: "action" },
     { id: "fund", label: "Browse invoices to fund", action: () => router.push("/lp"), category: "action" },
     { id: "history", label: "View transaction history", action: () => router.push("/analytics"), category: "action" },
-    { id: "notifications", label: "Open notification settings", action: () => alert("Notification settings coming soon"), category: "settings" },
-    { id: "addressbook", label: "Open address book", action: () => alert("Address book coming soon"), category: "settings" },
+    { id: "notifications", label: "Open notification settings", action: () => router.push("/settings/notifications"), category: "settings" },
+    { id: "addressbook", label: "Open address book", action: () => router.push("/settings/address-book"), category: "settings" },
     { id: "darkmode", label: "Toggle dark mode", action: () => document.documentElement.classList.toggle("dark"), category: "settings" },
     { id: "shortcuts", label: "Keyboard shortcuts", action: () => onOpenShortcuts?.(), category: "settings" },
   ], [router, onOpenShortcuts]);

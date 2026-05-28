@@ -1,9 +1,11 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback, ReactNode, useRef } from "react";
-import Toast from "../components/Toast";
+import React, { createContext, useCallback, useContext, ReactNode } from "react";
+import { toast as sonnerToast } from "sonner";
+import AppToaster from "@/components/AppToaster";
+import { TOAST_AUTO_DISMISS_MS } from "@/lib/toast-config";
 
-export type ToastType = "pending" | "success" | "error";
+export type ToastType = "pending" | "success" | "error" | "info" | "warning";
 
 export interface ToastAction {
   label: string;
@@ -25,56 +27,81 @@ interface ToastContextType {
   removeToast: (id: string) => void;
 }
 
-const ToastContext = createContext<ToastContextType | undefined>(undefined);
+export const ToastContext = createContext<ToastContextType | undefined>(undefined);
+
+function buildDescription(toast: Omit<ToastMessage, "id">): string | undefined {
+  const parts: string[] = [];
+  if (toast.message) parts.push(toast.message);
+  if (toast.txHash) parts.push(`Tx: ${toast.txHash.slice(0, 8)}…`);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
+function durationForType(type: ToastType): number | typeof Infinity {
+  if (type === "error" || type === "pending") return Infinity;
+  return TOAST_AUTO_DISMISS_MS;
+}
+
+function showSonnerToast(id: string, toast: Omit<ToastMessage, "id">) {
+  const options = {
+    id,
+    description: buildDescription(toast),
+    duration: durationForType(toast.type),
+    action: toast.action
+      ? { label: toast.action.label, onClick: toast.action.onClick }
+      : undefined,
+  };
+
+  switch (toast.type) {
+    case "success":
+      sonnerToast.success(toast.title, options);
+      break;
+    case "error":
+      sonnerToast.error(toast.title, options);
+      break;
+    case "info":
+      sonnerToast.info(toast.title, options);
+      break;
+    case "warning":
+      sonnerToast.warning(toast.title, options);
+      break;
+    case "pending":
+      sonnerToast.loading(toast.title, options);
+      break;
+    default:
+      sonnerToast(toast.title, options);
+  }
+}
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const timers = useRef<{ [key: string]: NodeJS.Timeout }>({});
-
-  const removeToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-    if (timers.current[id]) {
-      clearTimeout(timers.current[id]);
-      delete timers.current[id];
-    }
+  const addToast = useCallback((toast: Omit<ToastMessage, "id">) => {
+    const id = Math.random().toString(36).slice(2, 11);
+    showSonnerToast(id, toast);
+    return id;
   }, []);
 
-  const addToast = useCallback((toast: Omit<ToastMessage, "id">) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { ...toast, id }]);
-    
-    // Only auto-dismiss if not pending
-    if (toast.type !== "pending") {
-      timers.current[id] = setTimeout(() => {
-        removeToast(id);
-      }, 6000);
-    }
-    
-    return id;
-  }, [removeToast]);
-
   const updateToast = useCallback((id: string, updates: Partial<Omit<ToastMessage, "id">>) => {
-    setToasts((prev) =>
-      prev.map((toast) => (toast.id === id ? { ...toast, ...updates } : toast))
-    );
+    showSonnerToast(id, {
+      type: updates.type ?? "info",
+      title: updates.title ?? "Updated",
+      ...updates,
+    });
+  }, []);
 
-    // If updated to success or error, start the 6s timer
-    if (updates.type && updates.type !== "pending") {
-      if (timers.current[id]) clearTimeout(timers.current[id]);
-      timers.current[id] = setTimeout(() => {
-        removeToast(id);
-      }, 6000);
-    }
-  }, [removeToast]);
+  const removeToast = useCallback((id: string) => {
+    sonnerToast.dismiss(id);
+  }, []);
 
   return (
     <ToastContext.Provider value={{ addToast, updateToast, removeToast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map((toast) => (
-          <Toast key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
-        ))}
-      </div>
+      <AppToaster />
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+        id="toast-live-region"
+      />
     </ToastContext.Provider>
   );
 }
