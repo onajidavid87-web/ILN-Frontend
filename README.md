@@ -18,7 +18,7 @@ npm test -- --update-snapshots
 
 ## Getting Started
 
-First, run the development server:
+First of all, run the development server:
 
 ```bash
 npm run dev
