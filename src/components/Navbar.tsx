@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useWallet } from "@/context/WalletContext";
 import { useTheme } from "@/hooks/useTheme";
 import WalletButton from "./WalletButton";
+import NotificationBell from "./NotificationBell";
 import { useState, useRef, useEffect } from "react";
 
 export default function Navbar() {
@@ -86,6 +87,8 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-4">
+          <NotificationBell />
+
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setLangOpen(!langOpen)}

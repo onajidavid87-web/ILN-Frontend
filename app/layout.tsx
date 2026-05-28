@@ -5,6 +5,7 @@ import I18nProvider from "@/components/I18nProvider";
 import { ToastProvider } from "@/context/ToastContext";
 import { WalletProvider } from "@/context/WalletContext";
 import { NotificationProvider } from "@/context/NotificationContext";
+import NotificationEventPoller from "@/components/NotificationEventPoller";
 import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
 import FABProvider from "@/components/FABProvider";
 import CommandPalette from "@/components/CommandPalette";
@@ -54,6 +55,7 @@ export default function RootLayout({
             <ToastProvider>
               <WalletProvider>
                 <NotificationProvider>
+                  <NotificationEventPoller />
                   <FABProvider />
                   <div className="min-h-screen flex flex-col">
                     <div className="flex-1">

@@ -7,8 +7,6 @@ import { useTranslation } from "react-i18next";
 import { useTransaction } from "@/hooks/useTransaction";
 import { useWallet } from "@/context/WalletContext";
 import { useToast } from "@/context/ToastContext";
-import { useNotification } from "@/context/NotificationContext";
-import { usePositionPolling } from "@/hooks/usePositionPolling";
 import TokenSelector, { TokenAmount } from "./TokenSelector";
 import InvoiceFilterBar from "./InvoiceFilterBar";
 import { useApprovedTokens } from "@/hooks/useApprovedTokens";
@@ -52,7 +50,6 @@ export default function LPDashboard() {
   const router = useRouter();
   const { address, connect } = useWallet();
   const { addToast, updateToast } = useToast();
-  const { addNotification } = useNotification();
   const { execute, loading: txLoading, signingModal } = useTransaction();
   const { tokenMap, defaultToken } = useApprovedTokens();
   const { t, i18n } = useTranslation();
@@ -60,14 +57,6 @@ export default function LPDashboard() {
   
   const { data: invoices = [], isLoading: loading, dataUpdatedAt } = useInvoices();
 
-  // Set up LP position polling to monitor funded invoices for state changes
-  usePositionPolling({
-    invoices,
-    address,
-    addToast,
-    addNotification,
-  });
-  
   const [activeTab, setActiveTab] = useState<Tab>("discovery");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isCheckingAllowance, setIsCheckingAllowance] = useState(false);
